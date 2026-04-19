@@ -286,12 +286,23 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
             # --- Defensive: validate LLM-extracted policy number against user text --
             # The LLM can silently "correct" a wrong number to a known-good one
             # (hallucination / digit-swap). Require the extracted digits to appear
-            # verbatim in at least one user utterance before trusting them.
+            # in at least one user utterance - either as numerals or spoken words
+            # ("six zero zero nine nine" -> "60099").
+            _WORD_DIGIT = {
+                "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+                "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+            }
+
+            def _normalise_spoken_digits(text: str) -> str:
+                for word, digit in _WORD_DIGIT.items():
+                    text = re.sub(rf"\b{word}\b", digit, text, flags=re.IGNORECASE)
+                return text
+
             extracted_policy = fields.get("policy_number")
             if extracted_policy:
                 extracted_digits = re.sub(r"\D", "", str(extracted_policy))
                 user_digits_seen = "".join(
-                    re.sub(r"\D", "", msg["content"])
+                    re.sub(r"\D", "", _normalise_spoken_digits(msg["content"]))
                     for msg in session["conversation_history"]
                     if msg["role"] == "user"
                 )
@@ -631,19 +642,31 @@ async def next_action(session_id: str):
     if not session:
         return JSONResponse(status_code=404, content={"error": "Session not found", "stage": "action"})
 
-    if session.get("customer_not_found"):
+    def _no_dispatch(reason: str) -> dict:
+        """Return and persist a no-dispatch result, always auto-approved.
+
+        There is nothing for the operator to decide when no action is taken -
+        forcing copilot pause here would deadlock the pipeline (no Approve button
+        is shown for action=none). Always mark approved so the frontend proceeds
+        straight to the SMS stage.
+        """
         result = {
             "action": "none",
             "garage": None,
             "top_garages": [],
             "additional_services": [],
             "estimated_response_minutes": 0,
-            "reasoning": "No action - customer not found in records. See SMS for next steps.",
+            "reasoning": reason,
         }
         session["action_result"] = result
         session["status"] = "notify"
-        auto_approved = _store_proposed(session, "action", result)
-        return {**result, "auto_approved": auto_approved}
+        session["stage_approvals"]["action"]["proposed"] = result
+        session["stage_approvals"]["action"]["edited"] = None
+        session["stage_approvals"]["action"]["status"] = "approved"
+        return {**result, "auto_approved": True}
+
+    if session.get("customer_not_found"):
+        return JSONResponse(_no_dispatch("No action - customer not found in records. See SMS for next steps."))
 
     fields = session["extracted_fields"]
     coverage = session.get("coverage_result")
@@ -652,7 +675,11 @@ async def next_action(session_id: str):
     if not coverage:
         return JSONResponse(status_code=422, content={"error": "Coverage check not yet completed", "stage": "action"})
 
-    # Resolve location to coordinates
+    # Short-circuit: no garage search needed when coverage is denied.
+    if coverage.get("covered") is False:
+        return JSONResponse(_no_dispatch("No dispatch - incident not covered under policy. See SMS for next steps."))
+
+    # Resolve location and find garages only for covered cases.
     location_desc = fields.get("location_description") or ""
     lat, lng = resolve_location(location_desc)
     fields["location_lat"] = lat
@@ -665,21 +692,6 @@ async def next_action(session_id: str):
         return JSONResponse(status_code=500, content={"error": "No garages found within range", "stage": "action"})
 
     tier = customer["tier"] if customer else "unknown"
-
-    # If coverage denied, return a no-dispatch result rather than picking a garage.
-    if coverage.get("covered") is False:
-        response = {
-            "action": "none",
-            "garage": None,
-            "top_garages": [],
-            "additional_services": [],
-            "estimated_response_minutes": 0,
-            "reasoning": "No dispatch - incident not covered under policy. See SMS for next steps.",
-        }
-        session["action_result"] = response
-        session["status"] = "notify"
-        auto_approved = _store_proposed(session, "action", response)
-        return {**response, "auto_approved": auto_approved}
 
     decision = select_action(
         garages=top_garages,
