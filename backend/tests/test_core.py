@@ -181,232 +181,141 @@ class TestPolicyLoading:
 
 
 # ---------------------------------------------------------------------------
-# 3. Policy clause parser
-# ---------------------------------------------------------------------------
-
-from embeddings import _parse_clauses, _load_all_clauses
-
-
-class TestClauseParser:
-    def test_parses_basic_clause(self):
-        text = (
-            "ALLIANZ TEST\n\n"
-            "Clause C1 - Engine failure\n"
-            "@tiers: bronze\n"
-            "@outcome: covered\n"
-            "@event_type: Roadside breakdown\n"
-            "@services: Roadside repair | Recovery\n\n"
-            "If your engine fails we will help.\n"
-        )
-        clauses = _parse_clauses(text)
-        assert len(clauses) == 1
-        c = clauses[0]
-        assert c["id"] == "C1"
-        assert c["title"] == "Engine failure"
-        assert c["tiers"] == ["bronze"]
-        assert c["outcome"] == "covered"
-        assert c["event_type"] == "Roadside breakdown"
-        assert "Roadside repair" in c["services"]
-        assert "Recovery" in c["services"]
-        assert "engine fails" in c["prose"]
-
-    def test_parses_trigger_keywords(self):
-        text = (
-            "Clause X1 - Commercial exclusion\n"
-            "@tiers: bronze, silver, gold\n"
-            "@outcome: not_covered\n"
-            "@trigger_keywords: uber, taxi\n\n"
-            "No cover for commercial use.\n"
-        )
-        clauses = _parse_clauses(text)
-        assert clauses[0]["trigger_keywords"] == ["uber", "taxi"]
-        assert clauses[0]["outcome"] == "not_covered"
-
-    def test_parses_trigger_incident_type(self):
-        text = (
-            "Clause G1 - Misfuelling\n"
-            "@tiers: gold\n"
-            "@outcome: covered\n"
-            "@trigger_incident_type: fuel\n\n"
-            "Wrong fuel cover.\n"
-        )
-        clauses = _parse_clauses(text)
-        assert clauses[0]["trigger_incident_type"] == "fuel"
-
-    def test_parses_trigger_drivable_false(self):
-        text = (
-            "Clause F1 - Onward travel\n"
-            "@tiers: gold\n"
-            "@outcome: covered\n"
-            "@trigger_drivable: false\n\n"
-            "Hire car when not drivable.\n"
-        )
-        clauses = _parse_clauses(text)
-        assert clauses[0]["trigger_drivable"] is False
-
-    def test_load_all_clauses_covers_three_tiers(self):
-        clauses = _load_all_clauses()
-        tiers_present = {t for c in clauses for t in c["tiers"]}
-        assert "bronze" in tiers_present
-        assert "silver" in tiers_present
-        assert "gold" in tiers_present
-        assert "gold_plus" not in tiers_present
-
-    def test_load_all_clauses_has_exclusions(self):
-        clauses = _load_all_clauses()
-        exclusions = [c for c in clauses if c["outcome"] == "not_covered"]
-        assert len(exclusions) >= 3
-        ids = [c["id"] for c in exclusions]
-        assert "X1" in ids
-        assert "X2" in ids
-        assert "X3" in ids
-
-    def test_load_all_clauses_gold_has_onward_travel(self):
-        clauses = _load_all_clauses()
-        f1 = next((c for c in clauses if c["id"] == "F1"), None)
-        assert f1 is not None
-        assert "gold" in f1["tiers"]
-        assert f1["trigger_drivable"] is False
-        assert any("hire car" in s.lower() for s in f1["services"])
-
-    def test_load_all_clauses_gold_has_misfuelling(self):
-        clauses = _load_all_clauses()
-        g1 = next((c for c in clauses if c["id"] == "G1"), None)
-        assert g1 is not None
-        assert g1["trigger_incident_type"] == "fuel"
-        assert "gold" in g1["tiers"]
-
-    def test_d1_home_start_covers_silver_and_gold(self):
-        clauses = _load_all_clauses()
-        d1 = next((c for c in clauses if c["id"] == "D1"), None)
-        assert d1 is not None
-        assert "silver" in d1["tiers"]
-        assert "gold" in d1["tiers"]
-        assert "bronze" not in d1["tiers"]
-
-
-# ---------------------------------------------------------------------------
-# 4. Coverage decision engine - trigger layer (mocked embeddings)
+# 3. Policy section parser (markdown-based)
 # ---------------------------------------------------------------------------
 
 import asyncio
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
+
+from embeddings import _parse_markdown_sections, _load_all_sections
 
 
-def _make_index_with_mock_embeddings(zero_vector_dim: int = 768):
-    """Build a PolicyIndex from real policy files but inject zero embeddings.
+class TestSectionParser:
+    def test_parses_basic_section(self):
+        text = "# Test Policy\n\n### Engine failure\n\nIf your engine fails we will help.\n"
+        sections = _parse_markdown_sections(text, "bronze")
+        assert len(sections) == 1
+        s = sections[0]
+        assert s["tier"] == "bronze"
+        assert s["section_title"] == "Engine failure"
+        assert "engine fails" in s["prose"]
 
-    Trigger-layer tests don't need real vectors - the triggers are purely
-    deterministic. Injecting zeros ensures no network call is made.
-    """
-    from embeddings import PolicyIndex, _load_all_clauses
-    idx = PolicyIndex()
-    idx.clauses = _load_all_clauses()
-    idx.embeddings = [[0.0] * zero_vector_dim for _ in idx.clauses]
-    idx.ready = True
-    return idx
+    def test_parses_multiple_sections(self):
+        text = "### Section A\n\nProse A.\n\n### Section B\n\nProse B.\n"
+        sections = _parse_markdown_sections(text, "gold")
+        assert len(sections) == 2
+        assert sections[0]["section_title"] == "Section A"
+        assert sections[1]["section_title"] == "Section B"
 
+    def test_section_without_prose_excluded(self):
+        text = "### Empty section\n\n### Filled section\n\nSome content here.\n"
+        sections = _parse_markdown_sections(text, "bronze")
+        assert len(sections) == 1
+        assert sections[0]["section_title"] == "Filled section"
 
-class TestCoverageDecisionTriggers:
-    """Trigger-layer tests: commercial, accident, and key_issue exclusions."""
+    def test_load_all_sections_covers_three_tiers(self):
+        sections = _load_all_sections()
+        tiers = {s["tier"] for s in sections}
+        assert tiers == {"bronze", "silver", "gold"}
 
-    def _run(self, fields: dict, customer: dict) -> dict:
-        idx = _make_index_with_mock_embeddings()
-        return asyncio.get_event_loop().run_until_complete(
-            idx.select_clauses(fields, customer)
-        )
+    def test_bronze_has_covered_and_exclusion_sections(self):
+        sections = _load_all_sections()
+        bronze_titles = [s["section_title"].lower() for s in sections if s["tier"] == "bronze"]
+        assert any("mechanical" in t or "electrical" in t for t in bronze_titles)
+        assert any("commercial" in t for t in bronze_titles)
+        assert any("accident" in t for t in bronze_titles)
 
-    def test_commercial_use_denied_across_tiers(self, commercial_customer):
-        for tier in ("bronze", "silver", "gold"):
-            c = dict(commercial_customer, tier=tier)
-            r = self._run({"incident_type": "breakdown", "incident_description": "broke down"}, c)
-            assert r["covered"] is False
-            assert "X1" in r["applicable_section"]
-            assert r["services_entitled"] == []
+    def test_gold_has_onward_travel_section(self):
+        sections = _load_all_sections()
+        gold_titles = [s["section_title"].lower() for s in sections if s["tier"] == "gold"]
+        assert any("onward travel" in t for t in gold_titles)
 
-    def test_accident_denied_by_trigger(self):
-        fields = {"incident_type": "accident", "incident_description": "I had an accident"}
-        r = self._run(fields, {"tier": "gold", "notes": ""})
-        assert r["covered"] is False
-        assert "X2" in r["applicable_section"]
+    def test_gold_has_misfuelling_section(self):
+        sections = _load_all_sections()
+        gold_titles = [s["section_title"].lower() for s in sections if s["tier"] == "gold"]
+        assert any("misfuel" in t for t in gold_titles)
 
-    def test_key_issue_denied_by_trigger(self):
-        fields = {"incident_type": "key_issue", "incident_description": "locked keys in car"}
-        r = self._run(fields, {"tier": "gold", "notes": ""})
-        assert r["covered"] is False
-        assert "X3" in r["applicable_section"]
-
-    def test_exclusion_beats_description(self, commercial_customer):
-        """Even with a generic description the commercial trigger must fire."""
-        fields = {"incident_type": "breakdown", "incident_description": "battery flat"}
-        r = self._run(fields, commercial_customer)
-        assert r["covered"] is False
-
-    def test_misfuelling_trigger_gold(self):
-        fields = {"incident_type": "fuel", "incident_description": "put wrong fuel in", "vehicle_drivable": True}
-        r = self._run(fields, {"tier": "gold", "notes": ""})
-        assert r["covered"] is True
-        assert "G1" in r["applicable_section"]
-        assert any("drain" in s.lower() or "flush" in s.lower() for s in r["services_entitled"])
-
-    def test_onward_travel_addon_when_nondrivable_gold(self):
-        fields = {
-            "incident_type": "breakdown",
-            "incident_description": "engine failure, car won't move",
-            "vehicle_drivable": False,
-        }
-        r = self._run(fields, {"tier": "gold", "notes": ""})
-        assert r["covered"] is True
-        # F1 triggered as addon - hire car must appear in services
-        assert any("hire car" in s.lower() for s in r["services_entitled"])
-        # F1 citation present
-        citation_ids = [c["section"] for c in r["citations"]]
-        assert "F1" in citation_ids
-
-    def test_onward_travel_not_triggered_when_drivable(self):
-        fields = {
-            "incident_type": "breakdown",
-            "incident_description": "engine fault but I can still drive",
-            "vehicle_drivable": True,
-        }
-        r = self._run(fields, {"tier": "gold", "notes": ""})
-        assert not any("hire car" in s.lower() for s in r.get("services_entitled", []))
-
-    def test_f1_not_available_for_bronze(self):
-        fields = {
-            "incident_type": "breakdown",
-            "incident_description": "car won't start",
-            "vehicle_drivable": False,
-        }
-        r = self._run(fields, {"tier": "bronze", "notes": ""})
-        assert not any("hire car" in s.lower() for s in r.get("services_entitled", []))
+    def test_silver_has_home_start_section(self):
+        sections = _load_all_sections()
+        silver_titles = [s["section_title"].lower() for s in sections if s["tier"] == "silver"]
+        assert any("home start" in t for t in silver_titles)
 
 
 # ---------------------------------------------------------------------------
-# 5. Tier filter - bronze cannot access gold-only clauses
+# 4. Coverage decision engine - LLM-assisted (mocked)
 # ---------------------------------------------------------------------------
 
-class TestTierFilter:
-    def _run(self, fields, customer):
-        idx = _make_index_with_mock_embeddings()
-        return asyncio.get_event_loop().run_until_complete(
-            idx.select_clauses(fields, customer)
-        )
+class TestCoverageDecisionLLM:
+    """Coverage decision tests with mocked embeddings and LLM calls."""
 
-    def test_bronze_never_gets_f1(self):
-        fields = {"incident_type": "breakdown", "incident_description": "broken down", "vehicle_drivable": False}
-        r = self._run(fields, {"tier": "bronze", "notes": ""})
-        citation_ids = [c["section"] for c in r.get("citations", [])]
-        assert "F1" not in citation_ids
-        services_text = " ".join(r.get("services_entitled", [])).lower()
-        assert "hire car" not in services_text
+    LLM_COVERED = {
+        "covered": True,
+        "event_type": "Roadside breakdown",
+        "applicable_section": "Mechanical or electrical failure at the roadside",
+        "services_entitled": ["Roadside repair attempt (up to 60 minutes)", "National recovery"],
+        "exclusions_flagged": [],
+        "reasoning": "Alternator failure is a covered mechanical fault under Gold.",
+        "citations": [{"section": "Mechanical or electrical failure at the roadside", "snippet": "..."}],
+        "confidence": 0.92,
+    }
 
-    def test_bronze_never_gets_g1(self):
-        # Misfuelling trigger (incident_type=fuel) should deny for bronze (G1 is gold-only)
-        fields = {"incident_type": "fuel", "incident_description": "wrong fuel", "vehicle_drivable": True}
-        r = self._run(fields, {"tier": "bronze", "notes": ""})
-        # G1 is @tiers: gold - bronze customer should not match G1
-        assert r["covered"] is not True or "G1" not in r.get("applicable_section", "")
+    def _make_index(self):
+        from embeddings import PolicyIndex, _load_all_sections
+        idx = PolicyIndex()
+        idx.sections = _load_all_sections()
+        idx.embeddings = [[0.0] * 768 for _ in idx.sections]
+        idx.ready = True
+        return idx
+
+    def _run(self, fields, customer, llm_response=None):
+        idx = self._make_index()
+        resp = llm_response if llm_response is not None else self.LLM_COVERED
+        with patch("embeddings.call_llm", new=AsyncMock(return_value=resp)):
+            with patch("embeddings.get_embedding", new=AsyncMock(return_value=[0.0] * 768)):
+                return asyncio.get_event_loop().run_until_complete(
+                    idx.select_clauses(fields, customer)
+                )
+
+    def test_llm_covered_decision_propagates(self):
+        fields = {"incident_type": "breakdown", "incident_description": "alternator died", "vehicle_drivable": True}
+        r = self._run(fields, {"tier": "gold", "notes": ""})
+        assert r["covered"] is True
+        assert r["confidence"] == 0.92
+        assert "National recovery" in r["services_entitled"]
+
+    def test_llm_denied_decision_propagates(self):
+        llm_resp = {
+            "covered": False,
+            "event_type": "Commercial use exclusion",
+            "applicable_section": "Commercial use and hire-or-reward",
+            "services_entitled": [],
+            "exclusions_flagged": ["Commercial use - vehicle used for Uber"],
+            "reasoning": "Customer notes indicate Uber use; excluded by policy.",
+            "citations": [],
+            "confidence": 0.95,
+        }
+        fields = {"incident_type": "breakdown", "incident_description": "broke down", "vehicle_drivable": True}
+        r = self._run(fields, {"tier": "bronze", "notes": "Uber driver"}, llm_resp)
+        assert r["covered"] is False
+        assert r["exclusions_flagged"] == ["Commercial use - vehicle used for Uber"]
+
+    def test_safety_net_on_low_confidence(self):
+        llm_resp = {**self.LLM_COVERED, "covered": True, "confidence": 0.3}
+        fields = {"incident_type": "other", "incident_description": "something unusual", "vehicle_drivable": None}
+        r = self._run(fields, {"tier": "gold", "notes": ""}, llm_resp)
+        assert r["covered"] is None
+        assert "0.30" in r["reasoning"] or "refer to" in r["reasoning"].lower()
+
+    def test_safety_net_on_llm_failure(self):
+        idx = self._make_index()
+        fields = {"incident_type": "breakdown", "incident_description": "engine died", "vehicle_drivable": False}
+        with patch("embeddings.call_llm", new=AsyncMock(side_effect=Exception("API error"))):
+            with patch("embeddings.get_embedding", new=AsyncMock(return_value=[0.0] * 768)):
+                r = asyncio.get_event_loop().run_until_complete(
+                    idx.select_clauses(fields, {"tier": "gold", "notes": ""})
+                )
+        assert r["covered"] is None
+        assert "failed" in r["reasoning"].lower()
 
 
 # ---------------------------------------------------------------------------

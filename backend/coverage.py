@@ -3,9 +3,9 @@ import re
 from pathlib import Path
 
 POLICY_FILES = {
-    "bronze": "data/policy_bronze.txt",
-    "silver": "data/policy_silver.txt",
-    "gold": "data/policy_gold.txt",
+    "bronze": "data/policy_bronze.md",
+    "silver": "data/policy_silver.md",
+    "gold": "data/policy_gold.md",
 }
 
 VALID_INCIDENT_TYPES = {

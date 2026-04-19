@@ -30,8 +30,8 @@ Customer (via phone / Web Speech API simulation)
            │ intake_complete
            ▼
 ┌───────────────────────┐
-│  POST /check-coverage │  ← Three-layer clause engine (embeddings.py)
-│                       │    Triggers → tier filter → cosine similarity
+│  POST /check-coverage │  ← Embedding retrieval + LLM decision (embeddings.py)
+│                       │    Top-K sections → LLM reads prose → JSON decision
 └──────────┬────────────┘
            │ coverage_result
            ▼
@@ -69,42 +69,29 @@ Autopilot mode is retained as an alternative - it runs the same pipeline end-to-
 | Stage | Approach | Reason |
 |---|---|---|
 | Intake | Gemini LLM (Flash Lite) | Conversational flexibility, STT noise handling, open-ended incident descriptions |
-| Coverage | Embedding clause matching | Deterministic triggers for hard exclusions; embeddings for narrative-based clause selection |
+| Coverage | Embedding retrieval + LLM judgment | Embeddings retrieve the most relevant policy sections; LLM reads prose and decides |
 | Action | Haversine + capability filter | Pure algorithm - nearest eligible garage is unambiguous |
 | SMS | Gemini LLM (JSON template) | Benefits from natural language variation; JSON schema prevents structural hallucinations |
 
-This keeps LLM calls to 2 per claim (intake turns + one SMS call), with one cheap embedding call for coverage.
+This keeps LLM calls to 3 per claim maximum (intake turns + one coverage call + one SMS call), with one embedding call per coverage decision for retrieval.
 
-### 3. Coverage: policy clauses as the single source of truth
+### 3. Coverage: natural-prose policy + RAG + LLM judgment
 
-A pure LLM coverage check risks hallucinating entitlements or misquoting limits. A hardcoded rule table separates decisions from policy text, so the two can drift apart. The solution: encode both the decision logic AND the verbatim text in the same place - the policy document itself.
+The policy documents (`backend/data/policy_*.md`) are written as plain markdown - the same format a product team would author them in, with human-readable section headers and prose paragraphs. There are no machine-readable metadata fields, no trigger tables, no pipe-separated service lists.
 
-Each clause in `backend/data/policy_*.txt` carries structured `@metadata` (tiers, outcome, services, triggers) plus a prose paragraph that gets embedded. The decision engine is three layers:
+The coverage decision is two steps:
 
-**Layer 1 - Trigger (deterministic, runs first)**
+**Step 1 - Retrieval (embedding-based)**
 
-Clauses carry optional triggers in their metadata:
-- `@trigger_keywords`: scanned against `customer.notes` (commercial exclusion)
-- `@trigger_incident_type`: matched against the extracted incident type (accident denial, misfuelling)
-- `@trigger_drivable`: matched against drivable status (onward travel add-on)
+On startup, each `### Section` heading and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. The embedding step narrows thousands of possible sentences down to the handful the LLM actually needs to read.
 
-Triggered exclusion clauses (`@outcome: not_covered`) deny coverage immediately. Triggered incident-type clauses become the PRIMARY clause directly (e.g. `G1 Misfuelling` when `incident_type=fuel`). Triggered drivable clauses add upgrade services on top of the embedding-selected primary (e.g. `F1 Onward travel` when `drivable=false` for a Gold customer).
+**Step 2 - Decision (LLM)**
 
-**Layer 2 - Tier filter (hard)**
+The retrieved sections are passed to the LLM as verbatim policy prose alongside the claim details (incident type, description, drivability, customer notes). The LLM reads them the way a human call-centre agent would and returns a structured JSON decision: `covered`, `services_entitled`, the applicable section title, reasoning, and verbatim citations.
 
-Each clause's `@tiers` list is checked against the customer's tier. A Bronze customer cannot retrieve Gold-only clauses regardless of the incident description.
+**Why this is more honest than a rule table**: a rule table encodes the decision separately from the policy text, so the two can drift. Here, the LLM reads the actual policy language - if the onward-travel section says "Group A hire car for up to 24 hours", that is exactly what appears in `services_entitled`. If the commercial-use exclusion says "including via Uber or Lyft", the LLM reads that when the customer's notes flag commercial use.
 
-**Layer 3 - Embedding (semantic)**
-
-Among the remaining clauses that carry no trigger metadata, `gemini-embedding-001` ranks by cosine similarity against `incident_description`. The top-1 clause becomes the PRIMARY: it drives `covered`, `event_type`, `services_entitled`, and the verbatim citation shown to the operator.
-
-**Why embeddings earn their keep here**: two Gold customers with the same outcome (`covered=True`) but different narratives cite different clauses:
-- *"the alternator died on the motorway"* → `Clause C1 - Mechanical or electrical failure`
-- *"I drove through standing water and the engine cut out"* → `Clause C4 - Severe weather immobilisation`
-
-The citation the operator and customer see reflects what actually happened, not a generic section header.
-
-**Confidence floor**: if the top-1 similarity score falls below 0.5 and no triggers fired, the engine returns `covered=None` with a "refer to operator" message rather than auto-deciding.
+**Confidence floor**: if the LLM returns `confidence < 0.5`, the engine returns `covered=None` with a "refer to operator" message rather than auto-deciding.
 
 ### 4. Deterministic action selection
 
@@ -189,19 +176,19 @@ Downstream stages read `edited` if present, else `proposed`. This makes operator
 │   ├── main.py              # FastAPI app - all HTTP + WebSocket endpoints
 │   ├── session.py           # In-memory session store and factory
 │   ├── coverage.py          # Validators, normalizers, safety-gate helpers
-│   ├── embeddings.py        # Policy clause parser + embedding index + three-layer decision engine
+│   ├── embeddings.py        # Markdown section parser + embedding index + retrieval + LLM decision
 │   ├── action.py            # Haversine, garage finder, deterministic action selector
 │   ├── llm.py               # LLM client (fallback chain) + embedding client
 │   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT
 │   ├── data/
 │   │   ├── customers.json   # 8 synthetic customers across 3 tiers
 │   │   ├── garages.json     # 10 garages across UK cities
-│   │   ├── policy_bronze.txt  # Clause-format policy files
-│   │   ├── policy_silver.txt
-│   │   └── policy_gold.txt
+│   │   ├── policy_bronze.md   # Natural-prose policy files (markdown sections)
+│   │   ├── policy_silver.md
+│   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       └── test_core.py     # 75 unit tests (no LLM calls, all mocked)
+│       └── test_core.py     # 68 unit tests (LLM calls mocked)
 │
 └── frontend/
     └── src/
@@ -295,6 +282,6 @@ Acknowledged shortcuts for a prototype:
 - **Voice**: uses Web Speech API (browser STT) and browser TTS. In production: WebRTC + streaming STT/TTS provider.
 - **Session storage**: in-memory dict. In production: Redis or a database with TTL.
 - **Location resolution**: keyword lookup table mapping city/road names to static lat/lng. In production: Google Maps Geocoding API.
-- **Policy clause index**: embeds 18 short clauses. In production: proper RAG over full policy documents with chunking, overlap, and metadata filtering.
+- **Policy clause index**: embeds ~24 short sections from 3 small markdown files. In production: proper RAG over full policy documents with chunking, overlap, and re-ranking.
 - **Authentication**: none. In production: agent login, session ownership, full audit log.
 - **Garage availability**: `open_now_override` boolean per record. In production: real-time availability feed from a dispatch system.
