@@ -2,6 +2,7 @@ sessions = {}
 
 
 def create_session(session_id: str):
+    """Initialise a blank session with all pipeline fields at their default state."""
     sessions[session_id] = {
         "id": session_id,
         "status": "intake",
@@ -45,4 +46,5 @@ def create_session(session_id: str):
 
 
 def get_session(session_id: str) -> dict | None:
+    """Return the session dict for the given ID, or None if it does not exist."""
     return sessions.get(session_id)

@@ -49,6 +49,7 @@ def names_plausibly_match(provided: str, record: str) -> bool:
 
 
 def load_policy(tier: str) -> str:
+    """Read and return the raw policy text for the given tier. Raises ValueError for unknown tiers."""
     if tier not in POLICY_FILES:
         raise ValueError(f"Unknown policy tier: '{tier}'. Valid tiers: {list(POLICY_FILES.keys())}")
     path = Path(__file__).parent / POLICY_FILES[tier]
@@ -70,6 +71,7 @@ def normalize_policy_number(raw) -> str | None:
 
 
 def find_customer(policy_number: str) -> dict | None:
+    """Look up a customer by policy number (accepts raw/normalised forms). Returns None if not found."""
     normalized = normalize_policy_number(policy_number)
     if not normalized:
         return None
@@ -90,7 +92,7 @@ def normalize_vehicle_reg(raw) -> str | None:
 
 
 def coerce_bool(raw):
-    """Accept bool, 'yes'/'no', 'true'/'false', '1'/'0'. Return None if ambiguous."""
+    """Coerce LLM-extracted drivable/safe flags to Python bool. Returns None if the value is ambiguous."""
     if isinstance(raw, bool):
         return raw
     if raw is None:
@@ -104,7 +106,7 @@ def coerce_bool(raw):
 
 
 def coerce_int(raw):
-    """Coerce to non-negative int, or None if not representable."""
+    """Coerce LLM-extracted passenger count to a non-negative int. Returns None if not representable."""
     if raw is None or raw == "":
         return None
     try:
@@ -115,7 +117,7 @@ def coerce_int(raw):
 
 
 def validate_incident_type(raw) -> str | None:
-    """Snap to enum, or None if no match."""
+    """Snap a free-text incident type to the canonical enum value. Returns None if unrecognised."""
     if not raw:
         return None
     lower = str(raw).strip().lower().replace(" ", "_").replace("-", "_")

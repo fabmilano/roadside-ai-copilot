@@ -34,6 +34,7 @@ CONFIDENCE_FLOOR = 0.50
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two vectors; returns 0.0 if either is the zero vector."""
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
@@ -124,6 +125,7 @@ def _parse_clauses(policy_text: str) -> list[dict]:
 
 
 def _load_all_clauses() -> list[dict]:
+    """Parse all policy_*.txt files and return a single flat list of clause objects."""
     all_clauses: list[dict] = []
     for path in sorted(DATA_DIR.glob("policy_*.txt")):
         all_clauses.extend(_parse_clauses(path.read_text()))
@@ -131,6 +133,7 @@ def _load_all_clauses() -> list[dict]:
 
 
 def _cache_key(clauses: list[dict]) -> str:
+    """SHA256 fingerprint of clause content + embedding model name. Cache is invalidated on any change."""
     payload = json.dumps(
         [{"id": c["id"], "tiers": c["tiers"], "prose": c.get("prose", "")} for c in clauses],
         sort_keys=True,
@@ -139,12 +142,23 @@ def _cache_key(clauses: list[dict]) -> str:
 
 
 class PolicyIndex:
+    """Holds the parsed clause objects and their embedding vectors.
+
+    `clauses` and `embeddings` are parallel lists: `embeddings[i]` is the
+    vector for `clauses[i]`. Built once on startup, then queried per claim.
+    """
+
     def __init__(self):
         self.clauses: list[dict] = []
         self.embeddings: list[list[float]] = []
         self.ready = False
 
     async def build(self):
+        """Parse all policy files, embed clause prose, and populate the index.
+
+        Loads from `.embedding_cache.json` when the content hash matches,
+        avoiding repeat API calls across server restarts.
+        """
         self.clauses = _load_all_clauses()
         key = _cache_key(self.clauses)
 
@@ -311,11 +325,13 @@ class PolicyIndex:
 
 
 def _snippet(clause: dict, max_len: int = 200) -> str:
+    """Return a truncated single-line prose snippet for use as a citation."""
     text = clause.get("prose", "").strip().replace("\n", " ")
     return text[:max_len - 3].rstrip() + "..." if len(text) > max_len else text
 
 
 def _refer_to_operator(reason: str) -> dict:
+    """Coverage result indicating the engine could not decide; human review required."""
     return {
         "covered": None,
         "event_type": "unknown",
@@ -332,6 +348,7 @@ _index: PolicyIndex | None = None
 
 
 async def get_policy_index() -> PolicyIndex:
+    """Return the singleton PolicyIndex, building it on first call."""
     global _index
     if _index is None:
         _index = PolicyIndex()

@@ -1,6 +1,6 @@
 # Roadside Assistance AI Co-Pilot
 
-A full-stack prototype demonstrating an AI co-pilot for human call-centre agents handling motor breakdown claims. The system combines a conversational intake agent, deterministic rule-based coverage evaluation, embedding-assisted policy citation retrieval, and an LLM-drafted SMS notification - all surfaced through an operator console with per-stage approve / edit / retry controls.
+A full-stack prototype demonstrating an AI co-pilot for human call-centre agents handling motor breakdown claims. The system combines a conversational intake agent, embedding-based policy clause matching for coverage decisions, deterministic garage selection, and an LLM-drafted SMS notification - all surfaced through an operator console with per-stage approve / edit / retry controls.
 
 ---
 
@@ -9,7 +9,7 @@ A full-stack prototype demonstrating an AI co-pilot for human call-centre agents
 The system is designed for a **human-in-the-loop** workflow, not autonomous operation. A call-centre agent runs the tool alongside a live customer call. The AI:
 
 - Conducts the structured intake conversation (collects name, policy, vehicle, location, incident, drivability)
-- Evaluates coverage against policy rules
+- Evaluates coverage against policy clauses using a three-layer engine (triggers → tier filter → embeddings)
 - Selects the nearest eligible garage
 - Drafts the customer SMS
 
@@ -30,8 +30,8 @@ Customer (via phone / Web Speech API simulation)
            │ intake_complete
            ▼
 ┌───────────────────────┐
-│  POST /check-coverage │  ← Rule table (coverage_rules.py)
-│                       │    + embedding citations (embeddings.py)
+│  POST /check-coverage │  ← Three-layer clause engine (embeddings.py)
+│                       │    Triggers → tier filter → cosine similarity
 └──────────┬────────────┘
            │ coverage_result
            ▼
@@ -69,21 +69,42 @@ Autopilot mode is retained as an alternative - it runs the same pipeline end-to-
 | Stage | Approach | Reason |
 |---|---|---|
 | Intake | Gemini LLM (Flash Lite) | Conversational flexibility, STT noise handling, open-ended incident descriptions |
-| Coverage | Rule table + embeddings | Fully deterministic, auditable, zero hallucination risk on entitlements |
+| Coverage | Embedding clause matching | Deterministic triggers for hard exclusions; embeddings for narrative-based clause selection |
 | Action | Haversine + capability filter | Pure algorithm - nearest eligible garage is unambiguous |
 | SMS | Gemini LLM (JSON template) | Benefits from natural language variation; JSON schema prevents structural hallucinations |
 
-This reduces LLM calls from 4 per claim to 2 (intake turns + one SMS call), with one cheap embedding call for policy citations.
+This keeps LLM calls to 2 per claim (intake turns + one SMS call), with one cheap embedding call for coverage.
 
-### 3. Coverage: rule table + embedding citations (hybrid)
+### 3. Coverage: policy clauses as the single source of truth
 
-A pure LLM coverage check risks hallucinating entitlements or misquoting limits. A pure rule table can't surface the policy text the customer cares about.
+A pure LLM coverage check risks hallucinating entitlements or misquoting limits. A hardcoded rule table separates decisions from policy text, so the two can drift apart. The solution: encode both the decision logic AND the verbatim text in the same place - the policy document itself.
 
-The hybrid approach:
-- **Rule table** (`coverage_rules.py`) encodes all tier/incident combinations deterministically. Outputs `covered`, `services_entitled`, `exclusions_flagged`, `reasoning`.
-- **Embedding retrieval** (`embeddings.py`) embeds all 11 policy sections at startup (cached to disk after first run), then runs one query embedding per claim to surface the 2 most relevant verbatim policy snippets as citations.
+Each clause in `backend/data/policy_*.txt` carries structured `@metadata` (tiers, outcome, services, triggers) plus a prose paragraph that gets embedded. The decision engine is three layers:
 
-Citations are steered by the rule table's own output (event type + applicable section + services list) rather than raw user text, so they align with what was actually decided. Covered claims exclude NOT_COVERED sections from retrieval; denied claims prefer them.
+**Layer 1 - Trigger (deterministic, runs first)**
+
+Clauses carry optional triggers in their metadata:
+- `@trigger_keywords`: scanned against `customer.notes` (commercial exclusion)
+- `@trigger_incident_type`: matched against the extracted incident type (accident denial, misfuelling)
+- `@trigger_drivable`: matched against drivable status (onward travel add-on)
+
+Triggered exclusion clauses (`@outcome: not_covered`) deny coverage immediately. Triggered incident-type clauses become the PRIMARY clause directly (e.g. `G1 Misfuelling` when `incident_type=fuel`). Triggered drivable clauses add upgrade services on top of the embedding-selected primary (e.g. `F1 Onward travel` when `drivable=false` for a Gold customer).
+
+**Layer 2 - Tier filter (hard)**
+
+Each clause's `@tiers` list is checked against the customer's tier. A Bronze customer cannot retrieve Gold-only clauses regardless of the incident description.
+
+**Layer 3 - Embedding (semantic)**
+
+Among the remaining clauses that carry no trigger metadata, `gemini-embedding-001` ranks by cosine similarity against `incident_description`. The top-1 clause becomes the PRIMARY: it drives `covered`, `event_type`, `services_entitled`, and the verbatim citation shown to the operator.
+
+**Why embeddings earn their keep here**: two Gold customers with the same outcome (`covered=True`) but different narratives cite different clauses:
+- *"the alternator died on the motorway"* → `Clause C1 - Mechanical or electrical failure`
+- *"I drove through standing water and the engine cut out"* → `Clause C4 - Severe weather immobilisation`
+
+The citation the operator and customer see reflects what actually happened, not a generic section header.
+
+**Confidence floor**: if the top-1 similarity score falls below 0.5 and no triggers fired, the engine returns `covered=None` with a "refer to operator" message rather than auto-deciding.
 
 ### 4. Deterministic action selection
 
@@ -98,7 +119,7 @@ All safety rules run as Python logic in the WebSocket handler, not as LLM instru
 | Emergency scan | Keyword match on user text | Override agent reply: tell customer to call 999 |
 | Policy digit verification | LLM-extracted digits vs user utterances | Drop extraction if LLM invented or altered digits |
 | Name plausibility | 3-char prefix match of name tokens | Fail if zero token overlap; 3-strike abort |
-| Vehicle mismatch | Extracted reg vs policy record | Reject mismatch, never leak DB reg; 3-strike abort |
+| Vehicle mismatch | Extracted reg vs policy record | Reject mismatch, never leak DB reg; 3-strike abort → vehicle_mismatch_abort |
 | Required fields gate | Server-side check before intake_complete | LLM cannot mark intake complete with missing fields |
 
 Gate firings are surfaced to the operator console (GateBanner) with opaque summaries - no policy specifics, no PII from the database.
@@ -143,7 +164,7 @@ The server assembles these into the final SMS string. This keeps the LLM's natur
 gemini-2.5-flash-lite  →  gemini-2.5-flash  →  gemini-3.1-flash-lite-preview  →  gemini-3-flash-preview
 ```
 
-Tried in order on any failure. Embedding model (`gemini-embedding-001`) has no fallback - it is a fixed dependency for the policy section index.
+Tried in order on any failure. Embedding model (`gemini-embedding-001`) has no fallback - it is a fixed dependency for the clause index.
 
 ### 9. Session state machine
 
@@ -168,21 +189,19 @@ Downstream stages read `edited` if present, else `proposed`. This makes operator
 │   ├── main.py              # FastAPI app - all HTTP + WebSocket endpoints
 │   ├── session.py           # In-memory session store and factory
 │   ├── coverage.py          # Validators, normalizers, safety-gate helpers
-│   ├── coverage_rules.py    # Deterministic coverage rule table (no LLM)
-│   ├── embeddings.py        # Policy section parser + embedding index + retrieval
+│   ├── embeddings.py        # Policy clause parser + embedding index + three-layer decision engine
 │   ├── action.py            # Haversine, garage finder, deterministic action selector
 │   ├── llm.py               # LLM client (fallback chain) + embedding client
 │   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT
 │   ├── data/
-│   │   ├── customers.json   # 8 synthetic customers across 4 tiers
+│   │   ├── customers.json   # 8 synthetic customers across 3 tiers
 │   │   ├── garages.json     # 10 garages across UK cities
-│   │   ├── policy_bronze.txt
+│   │   ├── policy_bronze.txt  # Clause-format policy files
 │   │   ├── policy_silver.txt
-│   │   ├── policy_gold.txt
-│   │   └── policy_gold_plus.txt
+│   │   └── policy_gold.txt
 │   └── tests/
 │       ├── conftest.py
-│       └── test_core.py     # 65 unit tests (no LLM calls, all mocked)
+│       └── test_core.py     # 75 unit tests (no LLM calls, all mocked)
 │
 └── frontend/
     └── src/
@@ -205,22 +224,24 @@ Downstream stages read `edited` if present, else `proposed`. This makes operator
 
 ## Synthetic data
 
-**Customers** - 8 records across 4 policy tiers:
+**Customers** - 8 records across 3 policy tiers:
 
-| Name | Policy | Tier | Notes |
+| Name | Policy | Tier | Demo notes |
 |---|---|---|---|
 | Sarah Mitchell | ALZ-10042 | Gold | Standard golden-path customer |
 | James Carter | ALZ-20187 | Bronze | Minimal cover - local recovery only |
-| Laura Barnes | ALZ-30295 | Gold Plus | European cover available |
+| Laura Barnes | ALZ-30295 | Gold | Non-drivable breakdown triggers onward travel add-on |
 | David Wilson | ALZ-40318 | Silver | Home Start included |
 | Emma Clark | ALZ-50421 | Gold | Good for vehicle mismatch demo |
-| Mark Stone | ALZ-60099 | Bronze | Uber driver - triggers commercial exclusion |
+| Mark Stone | ALZ-60099 | Bronze | Uber driver - triggers commercial exclusion (Clause X1) |
 | Claire Foster | ALZ-70512 | Silver | |
-| Tom Bradley | ALZ-80634 | Gold Plus | Tesla Model 3 - routes to EV-capable garages |
+| Tom Bradley | ALZ-80634 | Gold | Tesla Model 3 - routes to EV-capable garages |
 
 **Garages** - 10 records across UK cities (Manchester, Birmingham, Edinburgh, Leeds, Bristol, London x2, Glasgow, Cardiff). Each has a `capabilities` list (`mechanical`, `electrical`, `tyre`, `battery`, `ev`, `bodywork`) and `has_tow_truck` flag.
 
-**Policy tiers**: Bronze (roadside only) → Silver (+ home start) → Gold (+ national recovery + onward travel + misfuelling) → Gold Plus (+ European cover).
+**Policy tiers**: Bronze (roadside only) → Silver (+ home start) → Gold (+ national recovery + onward travel + misfuelling).
+
+**Policy clause format**: Each `policy_*.txt` file defines named clauses with `@metadata` (tiers, outcome, services, triggers) followed by prose that gets embedded. 18 clauses total across the three files (C1-C4 per tier, D1 Home Start, F1 Onward Travel, G1 Misfuelling, X1-X3 exclusions).
 
 ---
 
@@ -252,7 +273,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 65 tests, all unit tests, no external calls
+# 75 tests, all unit tests, no external calls
 ```
 
 ---
@@ -274,6 +295,6 @@ Acknowledged shortcuts for a prototype:
 - **Voice**: uses Web Speech API (browser STT) and browser TTS. In production: WebRTC + streaming STT/TTS provider.
 - **Session storage**: in-memory dict. In production: Redis or a database with TTL.
 - **Location resolution**: keyword lookup table mapping city/road names to static lat/lng. In production: Google Maps Geocoding API.
-- **Policy index**: embeds 11 short policy sections. In production: proper RAG over full policy documents with a chunking and overlap strategy.
+- **Policy clause index**: embeds 18 short clauses. In production: proper RAG over full policy documents with chunking, overlap, and metadata filtering.
 - **Authentication**: none. In production: agent login, session ownership, full audit log.
 - **Garage availability**: `open_now_override` boolean per record. In production: real-time availability feed from a dispatch system.

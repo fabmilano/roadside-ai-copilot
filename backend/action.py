@@ -89,7 +89,12 @@ DEFAULT_LOCATION = (51.5074, -0.1278)
 
 
 def resolve_location(description: str) -> tuple[float, float]:
-    """Map a freetext location description to approximate lat/lng via keyword lookup."""
+    """Map a free-text location description to approximate lat/lng via keyword lookup.
+
+    Scans the description for known city, road, or landmark keywords. Falls back
+    to central London if no keyword matches - callers should treat the fallback
+    as "location unknown" for any distance-sensitive logic.
+    """
     if not description:
         return DEFAULT_LOCATION
     lower = description.lower()
@@ -100,11 +105,13 @@ def resolve_location(description: str) -> tuple[float, float]:
 
 
 def load_garages() -> list:
+    """Load the garage records from data/garages.json."""
     path = Path(__file__).parent / "data" / "garages.json"
     return json.loads(path.read_text())
 
 
 def haversine_miles(lat1, lng1, lat2, lng2) -> float:
+    """Great-circle distance in miles between two lat/lng points."""
     R = 3959
     dlat = math.radians(lat2 - lat1)
     dlng = math.radians(lng2 - lng1)
@@ -116,6 +123,7 @@ def haversine_miles(lat1, lng1, lat2, lng2) -> float:
 
 
 def find_nearby_garages(lat: float, lng: float, max_miles: float = 15.0) -> list:
+    """Return all garages within max_miles of the given coordinates, sorted by distance."""
     garages = load_garages()
     results = []
     for g in garages:
@@ -142,6 +150,7 @@ INCIDENT_CAPABILITY = {
 
 
 def _required_capability(incident_type: str | None) -> str:
+    """Map incident type to the garage capability needed for a mobile repair."""
     return INCIDENT_CAPABILITY.get((incident_type or "").lower(), "mechanical")
 
 
