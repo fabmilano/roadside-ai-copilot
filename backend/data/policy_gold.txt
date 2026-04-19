@@ -1,26 +1,53 @@
-ALLIANZ MOTOR BREAKDOWN COVER - GOLD (ROADSIDE + HOME START + NATIONAL RECOVERY + ONWARD TRAVEL)
+ALLIANZ MOTOR BREAKDOWN COVER - GOLD
 
-Includes all Silver (Sections C + D) benefits, plus:
+Includes all Silver benefits (Clauses C1-C4, D1), plus national recovery (Clause C1 upgraded), onward travel (Clause F1), and misfuelling (Clause G1).
 
-Section E - UK Recovery
-If the vehicle cannot be repaired at the roadside or at your home:
-- We will arrange and pay for recovery of the vehicle and up to 7 passengers to any single UK destination of your choice.
-- This replaces the 10-mile local recovery limit in Bronze/Silver.
-- Labour time extended to up to 60 minutes before recovery is arranged.
+Clause C1 - Mechanical or electrical failure at the roadside
+@tiers: gold
+@outcome: covered
+@event_type: Roadside breakdown
+@services: Roadside repair attempt (up to 60 minutes labour) | National recovery to any single UK destination (up to 7 passengers)
 
-Section F - Onward Travel
-If the vehicle cannot be repaired same-day, you are entitled to ONE of the following:
-- Replacement vehicle: Group A hire car for up to 24 hours
-- Hotel accommodation: One night for driver and passengers, up to £150 total
-- Alternative transport: Standard class rail fare for driver and passengers to their original destination, up to £75 per person
+If your vehicle suffers sudden mechanical or electrical failure at the roadside — including engine failure, starter motor faults, alternator problems, gearbox failure, clutch failure, or any other immobilising mechanical or electronic fault — we will dispatch an engineer to attempt a repair for up to 60 minutes. If the fault cannot be resolved, we will arrange national recovery to any single UK destination of your choice, including your home, your preferred garage, or your intended travel destination. Parts are at your cost.
 
-Section G - Additional Benefits (Gold)
-- Misfuelling: If you put the wrong fuel in your vehicle, we will arrange draining, flushing, and recovery. Fuel replacement is at your cost.
-- Message relay: We will contact one person on your behalf to advise of your situation.
+Clause C2 - Battery failure or discharge
+@tiers: gold
+@outcome: covered
+@event_type: Flat battery (electrical failure)
+@services: Jump-start attempt or battery diagnostic at the roadside | National recovery if battery cannot be jump-started (any single UK destination)
 
-NOT COVERED under Gold:
-- European breakdown
-- Vehicles used for hire/reward or commercial passenger transport
-- Vehicles over 15 years old
-- Pre-existing faults known before the journey commenced
-- Routine maintenance, servicing, or MOT failures
+If your vehicle will not start or has lost power due to a discharged, flat, or failed battery — whether from dead cells, leaving lights or accessories on, a battery that no longer holds charge, or a high-voltage EV battery management fault — we will attend and attempt a jump-start or full diagnostic. If the vehicle cannot be driven, we will recover it to any single UK destination of your choice. Replacement batteries and parts are at your cost.
+
+Clause C3 - Tyre damage and punctures
+@tiers: gold
+@outcome: covered
+@event_type: Flat tyre
+@services: Roadside wheel change using your spare tyre | National recovery if no spare is available (any single UK destination)
+
+If you suffer a puncture, blowout, or tyre damage that renders the vehicle unsafe or undrivable — caused by road debris, nails, a kerbed tyre, or a tyre sidewall failure — we will attend and fit your spare wheel at the roadside. If no roadworthy spare tyre is available, we will recover the vehicle to any single UK destination of your choice — home, a tyre fitter, or your intended destination. Replacement tyres are at your cost.
+
+Clause C4 - Severe weather immobilisation
+@tiers: gold
+@outcome: covered
+@event_type: Severe weather breakdown
+@services: Roadside assessment and safe recovery from hazard | National recovery to any single UK destination
+
+If your vehicle is immobilised by severe weather — including flooding, water ingress into the engine bay after driving through standing water, snow drifts, ice, hail damage, or being stranded on a waterlogged or impassable road — we will attend and arrange recovery. You may choose any single UK destination for recovery, including your home or a specialist garage. We cannot repair flood-damaged vehicles at the roadside.
+
+Clause F1 - Onward travel when vehicle cannot be driven
+@tiers: gold
+@outcome: covered
+@event_type: Onward travel
+@trigger_drivable: false
+@services: Group A hire car (up to 24 hours) | Hotel accommodation for driver and passengers (one night, up to GBP 150 total) | Standard class rail fare to destination (up to GBP 75 per person)
+
+If your Gold-covered vehicle cannot be repaired on the same day and is not drivable, you are entitled to one onward travel option of your choice: a Group A replacement hire car for up to 24 hours; hotel accommodation for one night for the driver and all passengers up to GBP 150 in total; or standard class rail fares for all passengers to their intended destination up to GBP 75 per person. Choose whichever option best suits your circumstances.
+
+Clause G1 - Misfuelling
+@tiers: gold
+@outcome: covered
+@event_type: Misfuelling
+@trigger_incident_type: fuel
+@services: Professional fuel drain and flush arranged by us | Recovery to nearest garage if vehicle cannot be driven after drain (fuel replacement cost at your expense)
+
+If you have put the wrong fuel type into your vehicle — including diesel into a petrol engine or petrol into a diesel engine — we will arrange a professional fuel drain and flush at the roadside or at the nearest suitable garage. If the vehicle cannot be driven safely after the procedure, we will arrange onward recovery. The cost of replacing the fuel is at your own expense. Misfuelling is not covered under Bronze or Silver.

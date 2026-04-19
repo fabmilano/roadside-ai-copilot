@@ -6,7 +6,6 @@ POLICY_FILES = {
     "bronze": "data/policy_bronze.txt",
     "silver": "data/policy_silver.txt",
     "gold": "data/policy_gold.txt",
-    "gold_plus": "data/policy_gold_plus.txt",
 }
 
 VALID_INCIDENT_TYPES = {

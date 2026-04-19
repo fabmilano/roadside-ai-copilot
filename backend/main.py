@@ -16,13 +16,11 @@ from coverage import (
     find_customer,
     has_emergency_signal,
     hydrate_from_customer_record,
-    load_policy,
     names_plausibly_match,
     normalize_policy_number,
     normalize_vehicle_reg,
     validate_incident_type,
 )
-from coverage_rules import evaluate as evaluate_coverage
 from embeddings import get_policy_index
 from llm import call_llm, call_llm_with_state
 from prompts import INTAKE_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
@@ -646,40 +644,11 @@ async def check_coverage(session_id: str):
         auto_approved = _store_proposed(session, "coverage", mismatch_result)
         return {**mismatch_result, "auto_approved": auto_approved}
 
-    # Sanity: ensure the policy file exists for this tier (cheap, no LLM).
-    try:
-        load_policy(customer["tier"])
-    except (ValueError, FileNotFoundError) as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "stage": "coverage"})
-
-    tier = customer["tier"]
-    result = evaluate_coverage(
-        tier=tier,
-        incident_type=fields.get("incident_type"),
-        drivable=fields.get("vehicle_drivable"),
-        customer=customer,
-    )
-
-    # Attach citations via embedding retrieval (non-fatal if it fails).
-    covered = bool(result.get("covered"))
-    # Steer the query with the rule table's own event/section + the services
-    # entitled. This aligns the embedding similarity with what we actually
-    # decided, rather than raw user text.
-    query_parts = [
-        result.get("event_type") or "",
-        result.get("applicable_section") or "",
-        " ".join(result.get("services_entitled") or []),
-        fields.get("incident_description") or "",
-    ]
-    query = " | ".join(p for p in query_parts if p).strip()
     try:
         index = await get_policy_index()
-        citations = await index.retrieve(
-            query, tier, k=2, prefer_exclusions=not covered
-        )
-    except Exception:
-        citations = []
-    result["citations"] = citations
+        result = await index.select_clauses(fields, customer)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e), "stage": "coverage"})
 
     session["coverage_result"] = result
     session["status"] = "action"

@@ -17,7 +17,7 @@
     "id": "C003",
     "name": "Laura Barnes",
     "policy_number": "ALZ-30295",
-    "tier": "gold_plus",
+    "tier": "gold",
     "vehicle": { "make": "Toyota", "model": "Yaris", "year": 2022, "reg": "LM22 NOP" }
   },
   {
@@ -53,7 +53,7 @@
     "id": "C008",
     "name": "Tom Bradley",
     "policy_number": "ALZ-80634",
-    "tier": "gold_plus",
+    "tier": "gold",
     "vehicle": { "make": "Tesla", "model": "Model 3", "year": 2023, "reg": "MN23 OPQ" }
   }
 ]
