@@ -263,8 +263,7 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
 
             reply = result.get("reply", "Sorry, I didn't catch that.")
             extracted = result.get("extracted", {})
-
-            session["conversation_history"].append({"role": "assistant", "content": json.dumps(result)})
+            # History appended AFTER gate processing so stored reply reflects any correction.
 
             # Merge non-null extracted fields into session state.
             # While policy is unconfirmed after failures, only accept name and policy_number -
@@ -495,6 +494,47 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
             intake_complete = bool(extracted.get("intake_complete", False))
             if intake_complete:
                 session["status"] = "coverage"
+
+            # --- Correction call --------------------------------------------------
+            # When a gate fires after the LLM call (vehicle mismatch, hydration,
+            # name mismatch, policy not found), the LLM's reply may be wrong or
+            # incomplete because it hadn't yet learned about the gate result.
+            # Instead of waiting for the customer to say something, trigger one
+            # additional LLM call immediately with the gate note so the agent
+            # asks the right follow-up question now.
+            post_gate_note = session.get("policy_validation_note")
+            needs_correction = post_gate_note is not None and not intake_complete
+            if needs_correction:
+                session["policy_validation_note"] = None  # consume now, not next turn
+                known = "\n".join(
+                    f"- {k}: {v if v is not None else '(not yet provided)'}"
+                    for k, v in session["extracted_fields"].items()
+                )
+                correction_msg = (
+                    f"KNOWN SO FAR:\n{known}\n"
+                    f"YOUR PREVIOUS REPLY (may need correction): {reply}\n"
+                    f"SYSTEM NOTE (critical - act on this now, override previous reply if needed): "
+                    f"{post_gate_note}\n"
+                    f"CUSTOMER: (still on the line, awaiting your next question)"
+                )
+                try:
+                    correction = await call_llm(
+                        INTAKE_SYSTEM_PROMPT, correction_msg, response_format="json"
+                    )
+                    reply = correction.get("reply", reply)
+                    session["conversation_history"].append(
+                        {"role": "assistant", "content": json.dumps({**result, "reply": reply})}
+                    )
+                except Exception:
+                    # Fall back: keep original reply, restore note for next turn
+                    session["policy_validation_note"] = post_gate_note
+                    session["conversation_history"].append(
+                        {"role": "assistant", "content": json.dumps(result)}
+                    )
+            else:
+                session["conversation_history"].append(
+                    {"role": "assistant", "content": json.dumps(result)}
+                )
 
             await websocket.send_json(
                 {
