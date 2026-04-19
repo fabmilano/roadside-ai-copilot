@@ -1,0 +1,92 @@
+[
+  {
+    "name": "Manchester Recovery Centre",
+    "lat": 53.4800,
+    "lng": -2.2400,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery"],
+    "hours": "7am-8pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Trafford Auto Services",
+    "lat": 53.4600,
+    "lng": -2.3200,
+    "capabilities": ["mechanical", "tyre", "battery"],
+    "hours": "8am-6pm Mon-Fri",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Birmingham Roadside Assist",
+    "lat": 52.4860,
+    "lng": -1.8900,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery", "bodywork"],
+    "hours": "24/7",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Edinburgh Breakdown Services",
+    "lat": 55.9530,
+    "lng": -3.1880,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery"],
+    "hours": "7am-8pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Yorkshire Vehicle Recovery",
+    "lat": 53.7990,
+    "lng": -1.5500,
+    "capabilities": ["mechanical", "tyre", "battery", "bodywork"],
+    "hours": "8am-7pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Bristol Auto Rescue",
+    "lat": 51.4540,
+    "lng": -2.5870,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery"],
+    "hours": "8am-6pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Central London Recovery",
+    "lat": 51.5074,
+    "lng": -0.1278,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery"],
+    "hours": "24/7",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "EV Specialists London",
+    "lat": 51.5155,
+    "lng": -0.0922,
+    "capabilities": ["electrical", "ev", "battery", "hybrid"],
+    "hours": "8am-6pm Mon-Fri",
+    "open_now_override": true,
+    "has_tow_truck": false
+  },
+  {
+    "name": "Glasgow City Recovery",
+    "lat": 55.8640,
+    "lng": -4.2520,
+    "capabilities": ["mechanical", "electrical", "tyre", "battery", "bodywork"],
+    "hours": "7am-9pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  },
+  {
+    "name": "Cardiff Vehicle Services",
+    "lat": 51.4816,
+    "lng": -3.1791,
+    "capabilities": ["mechanical", "tyre", "battery"],
+    "hours": "8am-6pm Mon-Sat",
+    "open_now_override": true,
+    "has_tow_truck": true
+  }
+]
