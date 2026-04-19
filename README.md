@@ -1,19 +1,20 @@
 # Roadside Assistance AI Co-Pilot
 
-A full-stack prototype demonstrating an AI co-pilot for human call-centre agents handling motor breakdown claims. The system combines a conversational intake agent, embedding-based policy clause matching for coverage decisions, deterministic garage selection, and an LLM-drafted SMS notification - all surfaced through an operator console with per-stage approve / edit / retry controls.
+A full-stack prototype of an AI co-pilot for call-centre agents handling motor breakdown claims. The system conducts the intake conversation, evaluates coverage against policy documents, selects a garage, and drafts the customer SMS - surfacing each output to an operator who can approve, edit, or retry before anything reaches the customer.
 
 ---
 
 ## What "co-pilot" means here
 
-The system is designed for a **human-in-the-loop** workflow, not autonomous operation. A call-centre agent runs the tool alongside a live customer call. The AI:
+The system is designed for a **human-in-the-loop** workflow, not autonomous operation. A call-centre agent runs the tool alongside a live customer call.
 
-- Conducts the structured intake conversation (collects name, policy, vehicle, location, incident, drivability)
-- Evaluates coverage against policy clauses using a three-layer engine (triggers → tier filter → embeddings)
-- Selects the nearest eligible garage
-- Drafts the customer SMS
+The distinction matters: observation alone isn't leverage. This prototype goes further than a monitoring dashboard - the operator console lets agents edit AI outputs before they take effect. That matters because:
 
-At each stage, the operator can **approve as-is, edit the AI's proposal, or retry**. The AI proposes; the human decides. An Autopilot mode is also available (all stages auto-approved, SMS auto-sent) for low-risk cases or demonstration purposes.
+- Coverage entitlements affect the customer directly. A missed hire-car entitlement means a stranded customer.
+- SMS wording can be legally sensitive. The agent should own what gets sent.
+- An agent who notices an error mid-flow should be able to fix it, not just flag it.
+
+**Autopilot mode** runs the same pipeline end-to-end with all stages auto-approved. It's available for low-risk cases or demos, and can be toggled mid-session (which auto-approves any pending stage).
 
 ---
 
@@ -24,96 +25,91 @@ Customer (via phone / Web Speech API simulation)
         │
         ▼
 ┌───────────────────────┐
-│  WebSocket /voice     │  ← Intake agent (Gemini LLM, O(1) prompt)
-│  intake conversation  │    Safety gates run deterministically here
+│  WebSocket /voice     │  ← LLM conducts intake conversation
+│  intake conversation  │    Safety gates run as deterministic Python checks
 └──────────┬────────────┘
            │ intake_complete
            ▼
 ┌───────────────────────┐
-│  POST /check-coverage │  ← Embedding retrieval + LLM decision (embeddings.py)
-│                       │    Top-K sections → LLM reads prose → JSON decision
+│  POST /check-coverage │  ← Embeddings retrieve relevant policy sections
+│                       │    LLM reads the prose and returns a JSON decision
 └──────────┬────────────┘
            │ coverage_result
            ▼
 ┌───────────────────────┐
-│  POST /next-action    │  ← Deterministic selector (action.py)
-│                       │    Haversine distance, capability match
+│  POST /next-action    │  ← Pure algorithm: Haversine distance + capability filter
+│                       │    No LLM
 └──────────┬────────────┘
            │ action_result
            ▼
 ┌───────────────────────┐
-│  POST /notify         │  ← Gemini LLM drafts JSON-structured SMS
+│  POST /notify         │  ← LLM drafts SMS as a JSON object
 │                       │    Server assembles fields into final text
 └───────────────────────┘
 
-All stages: proposed → [operator approval] → approved
-Mode switch copilot → autopilot auto-approves pending stages.
+Each stage: proposed → [operator approve / edit / retry] → approved
+Switching to Autopilot mid-session auto-approves all pending stages.
 ```
 
 ---
 
-## Design decisions
+## Where the LLM is used - and where it isn't
 
-### 1. Co-pilot over autonomous agent
+This is the most important design decision in the system. LLMs are good at language and judgment; they are unreliable at exact computation, rule enforcement, and deterministic checks. The split here tries to respect that.
 
-The goal is "a UI to observe the agent for humans" - but observation alone is not leverage. This prototype goes further: the operator console lets agents edit AI outputs before they reach the customer. This matters because:
-
-- Coverage entitlements affect customer outcomes directly (missed hire car = stranded customer)
-- SMS wording can be legally sensitive
-- An agent noticing an error mid-flow should be able to fix it, not just observe it
-
-Autopilot mode is retained as an alternative - it runs the same pipeline end-to-end and surfaces all outputs, so supervisors can review even when no intervention was made. The mode can be toggled mid-session; switching to autopilot auto-approves any pending stage and cascades.
-
-### 2. LLM only where needed
-
-| Stage | Approach | Reason |
+| Stage | Approach | Why |
 |---|---|---|
-| Intake | Gemini LLM (Flash Lite) | Conversational flexibility, STT noise handling, open-ended incident descriptions |
-| Coverage | Embedding retrieval + LLM judgment | Embeddings retrieve the most relevant policy sections; LLM reads prose and decides |
-| Action | Haversine + capability filter | Pure algorithm - nearest eligible garage is unambiguous |
-| SMS | Gemini LLM (JSON template) | Benefits from natural language variation; JSON schema prevents structural hallucinations |
+| Intake conversation | **LLM** (Gemini Flash Lite) | Customer speech is open-ended and noisy. The LLM needs to extract structured fields from natural language, handle STT transcription errors, and ask sensible follow-up questions. A rule-based parser can't do this. |
+| Safety gates | **Deterministic Python** | Emergency detection, policy digit verification, name plausibility, and vehicle mismatch must be right on adversarial inputs. An LLM instruction like "detect emergencies" can be confused by unusual phrasing or multi-topic utterances. Hard code these. |
+| Coverage decision | **Embeddings + LLM** | Coverage requires reading policy prose and reasoning about the claim. The policy documents are written in natural language and the set of possible claim descriptions is open-ended. An LLM that reads the relevant policy sections is the right tool here. |
+| Garage selection | **Deterministic algorithm** | Nearest eligible garage with the right capability is an unambiguous calculation. There is no judgment involved - the answer is a function of distance and a capability list. LLM adds cost and non-determinism for no benefit. |
+| SMS drafting | **LLM** (Gemini Flash Lite) | The SMS needs to be warm and readable, not just a data dump. The LLM provides natural language variation while a JSON output schema keeps the structure verifiable. |
 
-This keeps LLM calls to 3 per claim maximum (intake turns + one coverage call + one SMS call), with one embedding call per coverage decision for retrieval.
+### Intake safety gates in more detail
 
-### 3. Coverage: natural-prose policy + RAG + LLM judgment
-
-The policy documents (`backend/data/policy_*.md`) are written as plain markdown - the same format a product team would author them in, with human-readable section headers and prose paragraphs. There are no machine-readable metadata fields, no trigger tables, no pipe-separated service lists.
-
-The coverage decision is two steps:
-
-**Step 1 - Retrieval (embedding-based)**
-
-On startup, each `### Section` heading and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. The embedding step narrows thousands of possible sentences down to the handful the LLM actually needs to read.
-
-**Step 2 - Decision (LLM)**
-
-The retrieved sections are passed to the LLM as verbatim policy prose alongside the claim details (incident type, description, drivability, customer notes). The LLM reads them the way a human call-centre agent would and returns a structured JSON decision: `covered`, `services_entitled`, the applicable section title, reasoning, and verbatim citations.
-
-**Why this is more honest than a rule table**: a rule table encodes the decision separately from the policy text, so the two can drift. Here, the LLM reads the actual policy language - if the onward-travel section says "Group A hire car for up to 24 hours", that is exactly what appears in `services_entitled`. If the commercial-use exclusion says "including via Uber or Lyft", the LLM reads that when the customer's notes flag commercial use.
-
-**Confidence floor**: if the LLM returns `confidence < 0.5`, the engine returns `covered=None` with a "refer to operator" message rather than auto-deciding.
-
-### 4. Deterministic action selection
-
-Garage selection is pure algorithm: filter by `has_tow_truck` if non-drivable, match incident type to required capability, pick nearest, compute `ETA = 15 + distance_miles * 3`. No LLM call. The top 5 garages are returned to the frontend so the operator can override to a different one.
-
-### 5. Safety gates (deterministic, not LLM-driven)
-
-All safety rules run as Python logic in the WebSocket handler, not as LLM instructions:
+Five gates run as Python logic inside the WebSocket handler, not as LLM instructions. Any gate that fires overrides the LLM's reply:
 
 | Gate | Trigger | Behaviour |
 |---|---|---|
-| Emergency scan | Keyword match on user text | Override agent reply: tell customer to call 999 |
-| Policy digit verification | LLM-extracted digits vs user utterances | Drop extraction if LLM invented or altered digits |
+| Emergency scan | Keyword match on user text | Override agent reply: tell customer to call 999 immediately |
+| Policy digit verification | LLM-extracted digits not present in user utterances | Drop the extraction - the LLM invented or corrected digits |
 | Name plausibility | 3-char prefix match of name tokens | Fail if zero token overlap; 3-strike abort |
-| Vehicle mismatch | Extracted reg vs policy record | Reject mismatch, never leak DB reg; 3-strike abort → vehicle_mismatch_abort |
-| Required fields gate | Server-side check before intake_complete | LLM cannot mark intake complete with missing fields |
+| Vehicle mismatch | Extracted reg doesn't match policy record | Reject mismatch, never leak the DB reg; 3-strike abort |
+| Required fields gate | Server-side check before `intake_complete` | LLM cannot close intake with missing required fields |
 
-Gate firings are surfaced to the operator console (GateBanner) with opaque summaries - no policy specifics, no PII from the database.
+Gate firings are surfaced to the operator console with opaque summaries - no policy specifics, no PII from the database.
 
-### 6. O(1) prompt size for intake
+---
 
-The intake LLM receives a state snapshot per turn rather than the full conversation history:
+## Coverage: how the policy decision works
+
+### Why not a rule table
+
+The naive approach to coverage is a rule table: `if tier == "gold" and incident_type == "fuel": covered = True, services = [...]`. This works until the policy changes, the rule table doesn't get updated, and entitlements drift from what the document says. The table is also brittle to edge cases (what is a "fuel incident" exactly?) and silent about *why* a claim was decided the way it was.
+
+### Why not pure LLM without retrieval
+
+Sending the whole policy to an LLM on every claim is expensive, and a general-purpose LLM can hallucinate entitlements that aren't in the policy or misquote the terms of coverage.
+
+### The approach: RAG + grounded LLM judgment
+
+The policy documents (`backend/data/policy_*.md`) are plain markdown - section headers and prose paragraphs, written the way a product team would write them. No machine-readable metadata, no trigger tables.
+
+**Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity.
+
+**Step 2 - LLM decision**: the retrieved sections are passed to the LLM as verbatim policy prose, alongside the claim details. The LLM reads them and returns a structured JSON decision: `covered`, `services_entitled`, the applicable section title, reasoning, and verbatim citations. The prompt instructs the LLM to use only the provided excerpts and not invent services.
+
+**What the embeddings actually do**: they narrow the policy down to the handful of sections relevant to this specific claim before the LLM reads anything. At demo scale (24 sections across 3 small files) you could skip embeddings and send the whole tier file to the LLM - the pattern earns its keep at production scale, where the policy is a 200-page document.
+
+**What the LLM adds over embeddings alone**: judgment. Two sections might be semantically similar to the incident description, but only one actually applies. More importantly, the LLM catches cross-field reasoning that embeddings can't: a claim description that says "my car broke down" ranks low against the "commercial use exclusion" section by cosine similarity, but the LLM reads the customer notes field ("Uber driver - commercial use") alongside that exclusion prose and denies coverage correctly.
+
+**Confidence floor**: if the LLM returns `confidence < 0.5`, the engine returns `covered=None` with a "refer to operator" message rather than auto-deciding.
+
+---
+
+## O(1) intake prompt size
+
+The intake LLM receives a state snapshot per turn, not the full conversation history:
 
 ```
 KNOWN SO FAR:
@@ -125,11 +121,13 @@ SYSTEM NOTE: ...
 CUSTOMER: <latest utterance>
 ```
 
-Prompt size is bounded regardless of call length. The LLM doesn't see verbatim conversation history - only extracted state and its own last reply. This is acceptable because intake is structured: once a field is extracted and validated, it doesn't need to be re-derived.
+Prompt size is bounded regardless of call length. The LLM sees only extracted state and its own last reply. This works because intake is structured: once a field is extracted and validated, it doesn't need to be re-derived from the transcript.
 
-### 7. JSON-template SMS
+---
 
-The SMS LLM receives structured input and returns a JSON object with fixed fields:
+## SMS JSON template
+
+The SMS LLM receives structured input and returns a fixed JSON schema:
 
 ```json
 {
@@ -143,17 +141,11 @@ The SMS LLM receives structured input and returns a JSON object with fixed field
 }
 ```
 
-The server assembles these into the final SMS string. This keeps the LLM's natural language benefits (warm, adaptive wording) while making the structure verifiable and operator-editable field by field.
+The server assembles these fields into the final SMS string. The operator sees and can edit each field individually before sending.
 
-### 8. LLM model fallback chain
+---
 
-```
-gemini-2.5-flash-lite  →  gemini-2.5-flash  →  gemini-3.1-flash-lite-preview  →  gemini-3-flash-preview
-```
-
-Tried in order on any failure. Embedding model (`gemini-embedding-001`) has no fallback - it is a fixed dependency for the clause index.
-
-### 9. Session state machine
+## Session state machine
 
 ```
 intake → coverage → action → notify → complete
@@ -164,7 +156,7 @@ Per stage:
 {"status": "idle" | "proposed" | "approved", "proposed": {...}, "edited": {...}}
 ```
 
-Downstream stages read `edited` if present, else `proposed`. This makes operator overrides meaningful end-to-end: changing the garage on the action card affects what appears in the SMS draft.
+Downstream stages read `edited` if present, else `proposed`. Operator overrides are meaningful end-to-end: changing the garage on the action card changes what appears in the SMS draft.
 
 ---
 
@@ -173,26 +165,26 @@ Downstream stages read `edited` if present, else `proposed`. This makes operator
 ```
 .
 ├── backend/
-│   ├── main.py              # FastAPI app - all HTTP + WebSocket endpoints
+│   ├── main.py              # FastAPI app - all HTTP + WebSocket endpoints; safety gates
 │   ├── session.py           # In-memory session store and factory
-│   ├── coverage.py          # Validators, normalizers, safety-gate helpers
-│   ├── embeddings.py        # Markdown section parser + embedding index + retrieval + LLM decision
-│   ├── action.py            # Haversine, garage finder, deterministic action selector
+│   ├── coverage.py          # Field validators, normalizers, and safety-gate helpers
+│   ├── embeddings.py        # Policy section parser + embedding index + retrieval + LLM decision
+│   ├── action.py            # Haversine distance, garage finder, deterministic action selector
 │   ├── llm.py               # LLM client (fallback chain) + embedding client
-│   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT
+│   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, COVERAGE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
 │   ├── data/
 │   │   ├── customers.json   # 8 synthetic customers across 3 tiers
 │   │   ├── garages.json     # 10 garages across UK cities
-│   │   ├── policy_bronze.md   # Natural-prose policy files (markdown sections)
+│   │   ├── policy_bronze.md # Natural-prose policy files (markdown sections)
 │   │   ├── policy_silver.md
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       └── test_core.py     # 68 unit tests (LLM calls mocked)
+│       └── test_core.py     # 68 unit tests (LLM and embedding calls mocked)
 │
 └── frontend/
     └── src/
-        ├── App.jsx          # Orchestrator: state machine, mode toggle, handlers
+        ├── App.jsx          # Orchestrator: state machine, mode toggle, stage handlers
         ├── index.css        # All styles (no CSS framework)
         ├── components/
         │   ├── VoiceChat.jsx        # Customer simulator (Web Speech API)
@@ -217,18 +209,18 @@ Downstream stages read `edited` if present, else `proposed`. This makes operator
 |---|---|---|---|
 | Sarah Mitchell | ALZ-10042 | Gold | Standard golden-path customer |
 | James Carter | ALZ-20187 | Bronze | Minimal cover - local recovery only |
-| Laura Barnes | ALZ-30295 | Gold | Non-drivable breakdown triggers onward travel add-on |
+| Laura Barnes | ALZ-30295 | Gold | Non-drivable; LLM should include onward travel from policy |
 | David Wilson | ALZ-40318 | Silver | Home Start included |
 | Emma Clark | ALZ-50421 | Gold | Good for vehicle mismatch demo |
-| Mark Stone | ALZ-60099 | Bronze | Uber driver - triggers commercial exclusion (Clause X1) |
+| Mark Stone | ALZ-60099 | Bronze | Customer notes flag Uber/commercial use; LLM should deny |
 | Claire Foster | ALZ-70512 | Silver | |
 | Tom Bradley | ALZ-80634 | Gold | Tesla Model 3 - routes to EV-capable garages |
 
-**Garages** - 10 records across UK cities (Manchester, Birmingham, Edinburgh, Leeds, Bristol, London x2, Glasgow, Cardiff). Each has a `capabilities` list (`mechanical`, `electrical`, `tyre`, `battery`, `ev`, `bodywork`) and `has_tow_truck` flag.
+**Garages** - 10 records across UK cities (Manchester, Birmingham, Edinburgh, Leeds, Bristol, London x2, Glasgow, Cardiff). Each has a `capabilities` list (`mechanical`, `electrical`, `tyre`, `battery`, `ev`, `bodywork`) and a `has_tow_truck` flag.
 
-**Policy tiers**: Bronze (roadside only) → Silver (+ home start) → Gold (+ national recovery + onward travel + misfuelling).
+**Policy tiers**: Bronze (roadside + local recovery, no home) → Silver (+ Home Start) → Gold (+ national recovery + onward travel + misfuelling).
 
-**Policy clause format**: Each `policy_*.txt` file defines named clauses with `@metadata` (tiers, outcome, services, triggers) followed by prose that gets embedded. 18 clauses total across the three files (C1-C4 per tier, D1 Home Start, F1 Onward Travel, G1 Misfuelling, X1-X3 exclusions).
+**Policy format**: plain markdown files. Each tier has a `## What is covered` section and a `## What is not covered` section, each split into `### Named subsections` that become individual embedding chunks.
 
 ---
 
@@ -260,7 +252,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 75 tests, all unit tests, no external calls
+# 68 tests - LLM and embedding calls are mocked throughout
 ```
 
 ---
@@ -270,18 +262,31 @@ pytest
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `LLM_API_KEY` | Yes | - | Gemini API key |
-| `LLM_MODEL_CHAIN` | No | `gemini/gemini-2.5-flash-lite,...` | Comma-separated fallback chain |
-| `EMBEDDING_MODEL_NAME` | No | `gemini/gemini-embedding-001` | Fixed embedding model (no fallback) |
+| `LLM_MODEL_CHAIN` | No | `gemini/gemini-2.5-flash-lite,...` | Comma-separated fallback chain for LLM calls |
+| `EMBEDDING_MODEL_NAME` | No | `gemini/gemini-embedding-001` | Embedding model (no fallback - fixed dependency) |
 
 ---
 
-## Known simplifications
+## Known limitations
 
-Acknowledged shortcuts for a prototype:
+These are intentional shortcuts for a prototype, not oversights.
 
-- **Voice**: uses Web Speech API (browser STT) and browser TTS. In production: WebRTC + streaming STT/TTS provider.
-- **Session storage**: in-memory dict. In production: Redis or a database with TTL.
-- **Location resolution**: keyword lookup table mapping city/road names to static lat/lng. In production: Google Maps Geocoding API.
-- **Policy clause index**: embeds ~24 short sections from 3 small markdown files. In production: proper RAG over full policy documents with chunking, overlap, and re-ranking.
-- **Authentication**: none. In production: agent login, session ownership, full audit log.
-- **Garage availability**: `open_now_override` boolean per record. In production: real-time availability feed from a dispatch system.
+**Coverage decisions are non-deterministic.** The LLM coverage call can return different results for the same claim on different runs, or be swayed by how the incident is phrased. A rule table is fully deterministic; this design trades that for flexibility and policy-grounding. The operator approval step is the human check on this.
+
+**LLM hallucination is mitigated but not eliminated.** The coverage prompt instructs the LLM to use only the provided policy excerpts and not invent services. In practice, a capable model follows this reliably - but it is an instruction, not a hard constraint. An operator reviewing the coverage card before approval is the backstop.
+
+**The confidence score is self-reported.** The `confidence` field in the coverage JSON is returned by the LLM itself, not computed from an external signal. It is a useful heuristic for the refer-to-operator floor, but it is not calibrated.
+
+**Commercial exclusion is now soft, not hard.** The previous design used a deterministic keyword scan on `customer.notes` to deny commercial-use claims. Now the LLM reads the notes and the exclusion prose and decides. This is more natural and handles novel phrasings, but it is probabilistic. For a production system handling fraud risk, this rule should probably be re-hardened.
+
+**Embeddings are underused at this scale.** With 24 short sections across 3 small policy files, sending the full tier policy to the LLM would work fine and skip the retrieval step entirely. The embedding pattern is included because it is the right approach at production scale (a full policy document), and because it demonstrates the RAG pattern - but it is not strictly necessary here.
+
+**Voice is simulated.** Web Speech API (browser STT) and browser TTS. In production: WebRTC + a streaming STT/TTS provider.
+
+**Session storage is in-memory.** A Python dict. In production: Redis with TTL.
+
+**Location resolution is a keyword table.** City and road names map to static lat/lng coordinates. In production: Google Maps Geocoding API.
+
+**No authentication.** Any request can access any session. In production: agent login, session ownership, full audit log.
+
+**Garage availability is a static flag.** `open_now_override` boolean per record. In production: real-time availability feed from a dispatch system.
