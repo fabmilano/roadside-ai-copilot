@@ -69,7 +69,7 @@ export default function VoiceChat({ sessionId, onAgentResponse, onIntakeComplete
       setConnected(true)
       setDisconnected(false)
       reconnectAttempts.current = 0
-      const intro = "Hello, I'm your Allianz roadside assistance agent. I'm here to help you. Can you tell me your name and what's happened?"
+      const intro = "Hello, I'm your Alliance roadside assistance agent. I'm here to help you. Can you tell me your name and what's happened?"
       addMessage('agent', intro)
       if (!introSpokenRef.current) {
         // Queue it - browser blocks TTS until first user interaction (autoplay policy).

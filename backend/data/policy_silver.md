@@ -1,4 +1,4 @@
-# Allianz Motor Breakdown Cover - Silver
+# Alliance Motor Breakdown Cover - Silver
 
 Silver extends Bronze with one additional benefit: Home Start. You are covered at or near your registered home address as well as at the roadside. All Bronze benefits apply in full.
 

@@ -1,4 +1,4 @@
-# Allianz Motor Breakdown Cover - Bronze
+# Alliance Motor Breakdown Cover - Bronze
 
 Bronze is our entry-level breakdown cover. It provides roadside assistance and local recovery within 10 miles when your vehicle breaks down away from home. Breakdowns at or near your home address are not included under Bronze.
 

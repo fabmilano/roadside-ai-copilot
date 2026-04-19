@@ -1,4 +1,4 @@
-# Allianz Motor Breakdown Cover - Gold
+# Alliance Motor Breakdown Cover - Gold
 
 Gold is our most comprehensive tier. It includes all Bronze and Silver benefits, extends local recovery to national recovery (any UK destination), and adds three Gold-only benefits: onward travel when the vehicle cannot be driven, misfuelling cover, and national-distance Home Start.
 

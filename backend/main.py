@@ -48,7 +48,7 @@ def _assemble_sms(parts: dict) -> str:
     return " ".join(out)
 
 
-app = FastAPI(title="Allianz Roadside Co-Pilot", lifespan=lifespan)
+app = FastAPI(title="Alliance Roadside Co-Pilot", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -782,7 +782,7 @@ async def notify(session_id: str):
             f"Customer name: {fields.get('customer_name') or 'Unknown'}\n"
             f"case_ref: {case_ref}\n\n"
             "Return the JSON SMS object. status_line: we were unable to verify the vehicle on the policy after multiple attempts so cover cannot be provided at this time. "
-            "action_line: advise them to call Allianz Customer Relations on 0800 555 0199 with their vehicle registration to hand. "
+            "action_line: advise them to call Alliance Customer Relations on 0800 555 0199 with their vehicle registration to hand. "
             "eta_line and services_line should be empty strings."
         )
         try:
