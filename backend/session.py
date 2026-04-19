@@ -32,6 +32,7 @@ def create_session(session_id: str):
         "hydration_acknowledged": False,
         "pending_hydration": {},
         "customer_not_found": False,
+        "vehicle_mismatch_abort": False,
         "vehicle_mismatch_attempts": 0,
         "mode": "autopilot",
         "stage_approvals": {

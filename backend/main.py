@@ -343,7 +343,7 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
                         "Do NOT set intake_complete."
                     )
                 else:
-                    session["customer_not_found"] = True
+                    session["vehicle_mismatch_abort"] = True
                     session["policy_validation_note"] = (
                         "After multiple attempts the customer has been unable to confirm vehicle "
                         "details that match our records. Apologise sincerely, explain that you "
@@ -477,7 +477,7 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
                 "location_description", "incident_type", "incident_description",
                 "vehicle_drivable",
             ]
-            if extracted.get("intake_complete") and not session.get("customer_not_found"):
+            if extracted.get("intake_complete") and not session.get("customer_not_found") and not session.get("vehicle_mismatch_abort"):
                 missing = [f for f in REQUIRED_FOR_INTAKE if fields.get(f) is None]
                 if missing:
                     extracted["intake_complete"] = False
@@ -564,6 +564,21 @@ async def check_coverage(session_id: str):
     session = get_session(session_id)
     if not session:
         return JSONResponse(status_code=404, content={"error": "Session not found", "stage": "coverage"})
+
+    if session.get("vehicle_mismatch_abort"):
+        stub = {
+            "covered": False,
+            "event_type": "vehicle_identity_unverified",
+            "applicable_section": "Section A - Eligibility",
+            "services_entitled": [],
+            "exclusions_flagged": ["Vehicle identity could not be verified after multiple attempts"],
+            "reasoning": "The customer was unable to provide vehicle details matching the registered policy vehicle. Cover cannot be extended to an unverified vehicle.",
+            "citations": [],
+        }
+        session["coverage_result"] = stub
+        session["status"] = "action"
+        auto_approved = _store_proposed(session, "coverage", stub)
+        return {**stub, "auto_approved": auto_approved}
 
     if session.get("customer_not_found"):
         stub = {
@@ -705,6 +720,9 @@ async def next_action(session_id: str):
         session["stage_approvals"]["action"]["status"] = "approved"
         return {**result, "auto_approved": True}
 
+    if session.get("vehicle_mismatch_abort"):
+        return JSONResponse(_no_dispatch("No action - vehicle identity could not be verified. See SMS for next steps."))
+
     if session.get("customer_not_found"):
         return JSONResponse(_no_dispatch("No action - customer not found in records. See SMS for next steps."))
 
@@ -789,6 +807,32 @@ async def notify(session_id: str):
     action = session.get("action_result", {})
     customer = session.get("customer_record", {})
     case_ref = f"RA-2026-{random.randint(1000, 9999)}"
+
+    if session.get("vehicle_mismatch_abort"):
+        user_message = (
+            f"Customer name: {fields.get('customer_name') or 'Unknown'}\n"
+            f"case_ref: {case_ref}\n\n"
+            "Return the JSON SMS object. status_line: we were unable to verify the vehicle on the policy after multiple attempts so cover cannot be provided at this time. "
+            "action_line: advise them to call Allianz Customer Relations on 0800 555 0199 with their vehicle registration to hand. "
+            "eta_line and services_line should be empty strings."
+        )
+        try:
+            parts = await call_llm(SMS_NOT_FOUND_SYSTEM_PROMPT, user_message, response_format="json")
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
+        sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
+        auto_approved = session.get("mode", "autopilot") == "autopilot"
+        result = {
+            "sms_text": sms_text,
+            "sms_parts": parts if isinstance(parts, dict) else {},
+            "case_ref": case_ref,
+            "sent": auto_approved,
+        }
+        session["notification_result"] = result
+        if auto_approved:
+            session["status"] = "complete"
+        _store_proposed(session, "notify", result)
+        return {**result, "auto_approved": auto_approved}
 
     if session.get("customer_not_found"):
         user_message = (
