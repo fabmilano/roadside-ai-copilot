@@ -85,9 +85,9 @@ SMS_SYSTEM_PROMPT = """You draft SMS notifications for an Alliance roadside assi
 {
   "greeting": "Short personal greeting, max 20 chars (e.g. 'Hi Sarah,')",
   "status_line": "One sentence stating coverage outcome and event type (e.g. 'Your Gold policy covers this breakdown.'). If not covered, say so clearly and empathetically.",
-  "action_line": "One sentence on what we're doing - tow vs mobile repair, and the garage name. Omit if action is none.",
-  "eta_line": "Short ETA phrase (e.g. 'ETA ~25 mins.'). Omit if no dispatch.",
-  "services_line": "Single sentence listing ALL additional entitlements verbatim from the input (hire car, rail fare, hotel, misfuelling support etc). Empty string if none.",
+  "action_line": "One sentence on what we're dispatching. If recovery_action is tow, mention towing to the garage. If recovery_action is mobile_repair, mention the engineer attending. If onward_travel is set (not 'none'), also mention arranging that transport. If both are none, use an empty string.",
+  "eta_line": "Short ETA phrase (e.g. 'ETA ~25 mins.'). Omit (empty string) if recovery_action is none and no physical dispatch is happening.",
+  "services_line": "One sentence describing the onward travel arrangement if onward_travel is not 'none' (e.g. 'A Group A hire car will be arranged for up to 24 hours.'). Empty string if onward_travel is none.",
   "case_ref_line": "The literal string 'Case: <case_ref>' using the case_ref provided.",
   "emergency_footer": "The literal string 'For any medical or safety emergency call 999.'"
 }
@@ -96,7 +96,7 @@ Rules:
 - Every field is a single sentence or short phrase. No line breaks inside fields.
 - Be warm but factual. No emojis.
 - Do NOT invent services. Only include items present in the input.
-- If coverage is denied, status_line explains why briefly; action_line and eta_line empty strings.
+- If coverage is denied, status_line explains why briefly; action_line, eta_line, and services_line are empty strings.
 
 Respond with ONLY the JSON object."""
 

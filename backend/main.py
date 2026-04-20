@@ -675,10 +675,11 @@ async def next_action(session_id: str):
         straight to the SMS stage.
         """
         result = {
-            "action": "none",
+            "recovery_action": "none",
             "garage": None,
             "top_garages": [],
-            "additional_services": [],
+            "onward_travel": "none",
+            "onward_travel_options": [],
             "estimated_response_minutes": 0,
             "reasoning": reason,
         }
@@ -730,7 +731,7 @@ async def next_action(session_id: str):
     selected = decision["garage"] or top_garages[0]
 
     response = {
-        "action": decision["action"],
+        "recovery_action": decision["recovery_action"],
         "garage": {
             "name": selected["name"],
             "distance_miles": selected["distance_miles"],
@@ -750,7 +751,8 @@ async def next_action(session_id: str):
             }
             for g in top_garages
         ],
-        "additional_services": decision["additional_services"],
+        "onward_travel": decision["onward_travel"],
+        "onward_travel_options": decision["onward_travel_options"],
         "estimated_response_minutes": decision["estimated_response_minutes"],
         "reasoning": decision["reasoning"],
     }
@@ -828,12 +830,12 @@ async def notify(session_id: str):
         return {**result, "auto_approved": auto_approved}
 
     garage = action.get("garage") or {}
-    # Merge entitlements: prefer action.additional_services (pass-through from coverage
-    # minus roadside/recovery items), fall back to coverage.services_entitled if action is 'none'.
-    services = action.get("additional_services") or []
-    if not services and not action.get("action") or action.get("action") == "none":
-        services = coverage.get("services_entitled") or []
-    services_str = "; ".join(services) if services else "(none)"
+    onward_travel = action.get("onward_travel", "none")
+    onward_label = {
+        "hire_car": "Group A hire car (up to 24 hours)",
+        "rail": "Standard-class rail fare to destination",
+        "hotel": "Hotel accommodation (up to GBP 150 per night)",
+    }.get(onward_travel, "none")
 
     user_message = f"""Case inputs:
 
@@ -842,11 +844,11 @@ policy_tier: {customer.get("tier", "").upper() if customer else ""}
 coverage_covered: {coverage.get("covered")}
 coverage_event_type: {coverage.get("event_type", "")}
 coverage_reasoning: {coverage.get("reasoning", "")}
-action: {action.get("action", "none")}
+recovery_action: {action.get("recovery_action", "none")}
 garage_name: {garage.get("name", "")}
 eta_minutes: {action.get("estimated_response_minutes", 0)}
+onward_travel: {onward_label}
 case_ref: {case_ref}
-additional_services: {services_str}
 
 Return the JSON SMS object now."""
 

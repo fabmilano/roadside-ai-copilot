@@ -154,6 +154,26 @@ def _required_capability(incident_type: str | None) -> str:
     return INCIDENT_CAPABILITY.get((incident_type or "").lower(), "mechanical")
 
 
+_ONWARD_KEYWORDS = {
+    "hire_car": ("hire car", "replacement vehicle"),
+    "rail": ("rail", "train"),
+    "hotel": ("hotel", "accommodation"),
+}
+_ONWARD_PRIORITY = ["hire_car", "rail", "hotel"]
+
+_ROADSIDE_KEYS = ("roadside attempt", "local recovery", "national recovery",
+                  "home start", "labour")
+
+
+def _classify_onward(services: list[str]) -> list[str]:
+    """Return a deduplicated list of onward-travel option keys present in coverage services."""
+    found = []
+    for key in _ONWARD_PRIORITY:
+        if any(kw in svc.lower() for svc in services for kw in _ONWARD_KEYWORDS[key]):
+            found.append(key)
+    return found
+
+
 def select_action(
     garages: list,
     incident_type: str | None,
@@ -161,20 +181,30 @@ def select_action(
     coverage_services: list[str],
     tier: str,
 ) -> dict:
-    """Pick action + garage deterministically. Returns dict with action, garage, ETA, reasoning.
+    """Pick recovery action + onward travel deterministically.
+
+    Returns dict with:
+      recovery_action: "tow" | "mobile_repair" | "none"
+      garage: garage dict or None
+      garage_index: int
+      onward_travel: "hire_car" | "rail" | "hotel" | "none"
+      onward_travel_options: list of available onward-travel keys
+      estimated_response_minutes: int
+      reasoning: str
 
     Rules:
     - drivable=False -> tow; garage must have has_tow_truck=True.
     - drivable=True/None -> mobile_repair; nearest garage with the right capability.
-    - Additional services = non-roadside/recovery items from coverage_services (pass-through).
+    - onward_travel: first available entitlement from coverage when vehicle is not drivable.
     - ETA = 15 + distance * 3 (minutes).
     """
     if not garages:
         return {
-            "action": "none",
+            "recovery_action": "none",
             "garage": None,
             "garage_index": 0,
-            "additional_services": [],
+            "onward_travel": "none",
+            "onward_travel_options": [],
             "estimated_response_minutes": 0,
             "reasoning": "No garages found within range.",
         }
@@ -202,10 +232,10 @@ def select_action(
     distance = selected["distance_miles"]
     eta = int(15 + distance * 3)
 
-    action = "tow" if needs_tow else "mobile_repair"
+    recovery_action = "tow" if needs_tow else "mobile_repair"
     tier_label = (tier or "").replace("_", " ").upper()
     reasoning_bits = [
-        f"{tier_label} tier, {'non-drivable' if needs_tow else 'drivable'} vehicle -> {action.replace('_', ' ')}.",
+        f"{tier_label} tier, {'non-drivable' if needs_tow else 'drivable'} vehicle -> {recovery_action.replace('_', ' ')}.",
         f"Nearest eligible garage is {selected['name']} ({distance} miles away).",
     ]
     if needs_tow:
@@ -213,19 +243,16 @@ def select_action(
     else:
         reasoning_bits.append(f"Garage has the '{required_cap}' capability needed for this incident.")
 
-    # Pass through onward-travel / extra entitlements from coverage
-    ROADSIDE_KEYS = ("roadside attempt", "local recovery", "national recovery",
-                     "home start", "labour")
-    additional_services = [
-        svc for svc in (coverage_services or [])
-        if not any(kw in svc.lower() for kw in ROADSIDE_KEYS)
-    ]
+    # Onward-travel entitlements apply when the vehicle is not drivable.
+    onward_travel_options = _classify_onward(coverage_services or []) if needs_tow else []
+    onward_travel = onward_travel_options[0] if onward_travel_options else "none"
 
     return {
-        "action": action,
+        "recovery_action": recovery_action,
         "garage": selected,
         "garage_index": chosen_idx,
-        "additional_services": additional_services,
+        "onward_travel": onward_travel,
+        "onward_travel_options": onward_travel_options,
         "estimated_response_minutes": eta,
         "reasoning": " ".join(reasoning_bits),
     }

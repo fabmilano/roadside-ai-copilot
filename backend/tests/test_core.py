@@ -167,7 +167,7 @@ class TestPolicyLoading:
         text = load_policy(tier)
         assert isinstance(text, str)
         assert len(text) > 100
-        assert "ALLIANZ" in text.upper()
+        assert "ALLIANCE" in text.upper()
 
     def test_load_invalid_tier_raises(self):
         from coverage import load_policy
@@ -367,19 +367,19 @@ class TestActionSelector:
 
     def test_nondrivable_selects_tow_capable_garage(self):
         r = select_action(self._sorted(), "breakdown", False, [], "gold")
-        assert r["action"] == "tow"
+        assert r["recovery_action"] == "tow"
         assert r["garage"]["has_tow_truck"] is True
 
     def test_drivable_flat_tyre_picks_nearest_tyre_capable(self):
         r = select_action(self._sorted(), "flat_tyre", True, [], "silver")
-        assert r["action"] == "mobile_repair"
+        assert r["recovery_action"] == "mobile_repair"
         assert "tyre" in r["garage"]["capabilities"]
 
     def test_eta_scales_with_distance(self):
         r = select_action(self._sorted(), "breakdown", False, [], "gold")
         assert r["estimated_response_minutes"] == 19
 
-    def test_additional_services_filters_roadside_items(self):
+    def test_gold_nondrivable_with_hire_car_entitlement(self):
         services = [
             "Roadside repair attempt (up to 60 minutes labour)",
             "National recovery to any single UK destination",
@@ -387,14 +387,28 @@ class TestActionSelector:
             "Standard class rail fare to destination (up to GBP 75 per person)",
         ]
         r = select_action(self._sorted(), "breakdown", False, services, "gold")
-        assert any("hire car" in s.lower() for s in r["additional_services"])
-        assert any("rail fare" in s.lower() for s in r["additional_services"])
-        assert not any("roadside repair" in s.lower() for s in r["additional_services"])
-        assert not any("national recovery" in s.lower() for s in r["additional_services"])
+        assert r["recovery_action"] == "tow"
+        assert r["onward_travel"] == "hire_car"
+        assert "hire_car" in r["onward_travel_options"]
+        assert "rail" in r["onward_travel_options"]
+
+    def test_bronze_nondrivable_no_onward_services(self):
+        r = select_action(self._sorted(), "breakdown", False, [], "bronze")
+        assert r["recovery_action"] == "tow"
+        assert r["onward_travel"] == "none"
+        assert r["onward_travel_options"] == []
+
+    def test_drivable_has_no_onward_travel(self):
+        services = ["Group A hire car (up to 24 hours)"]
+        r = select_action(self._sorted(), "breakdown", True, services, "gold")
+        assert r["recovery_action"] == "mobile_repair"
+        assert r["onward_travel"] == "none"
+        assert r["onward_travel_options"] == []
 
     def test_empty_garages_returns_none_action(self):
         r = select_action([], "breakdown", False, [], "bronze")
-        assert r["action"] == "none"
+        assert r["recovery_action"] == "none"
+        assert r["onward_travel"] == "none"
         assert r["garage"] is None
 
 

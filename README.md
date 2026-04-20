@@ -156,7 +156,27 @@ Per stage:
 {"status": "idle" | "proposed" | "approved", "proposed": {...}, "edited": {...}}
 ```
 
-Downstream stages read `edited` if present, else `proposed`. Operator overrides are meaningful end-to-end: changing the garage on the action card changes what appears in the SMS draft.
+Downstream stages read `edited` if present, else `proposed`. Operator overrides are meaningful end-to-end: changing the dispatch on the action card changes what appears in the SMS draft.
+
+## Two dispatch slots per action
+
+Each claim has two parallel dispatch outputs, both shown on the action card and editable by the operator:
+
+| Slot | Values | Derived from |
+|---|---|---|
+| `recovery_action` | `tow` / `mobile_repair` / `none` | `vehicle_drivable` flag + coverage outcome |
+| `onward_travel` | `hire_car` / `rail` / `hotel` / `none` | Coverage `services_entitled` when vehicle is not drivable |
+
+This maps directly to the four outcomes in the brief:
+
+| Outcome | Example | `recovery_action` | `onward_travel` |
+|---|---|---|---|
+| Repair / tow only | James Carter, Bronze, non-drivable | `tow` | `none` |
+| Transport only | Operator edit: vehicle handled separately | `none` | `hire_car` |
+| Both | Laura Barnes, Gold, non-drivable | `tow` | `hire_car` |
+| Neither | Mark Stone, Bronze, Uber - denied | `none` | `none` |
+
+The AI proposes both slots based on coverage entitlements. In co-pilot mode the operator can override either via a dropdown before approving. The "transport only" case is reached by the operator setting `recovery_action` to `none` - for example, when the customer says their vehicle is already being recovered by a third party and they just need to get home.
 
 ---
 
@@ -180,7 +200,7 @@ Downstream stages read `edited` if present, else `proposed`. Operator overrides 
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       └── test_core.py     # 68 unit tests (LLM and embedding calls mocked)
+│       └── test_core.py     # 70 unit tests (LLM and embedding calls mocked)
 │
 └── frontend/
     └── src/
@@ -252,7 +272,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 68 tests - LLM and embedding calls are mocked throughout
+# 70 tests - LLM and embedding calls are mocked throughout
 ```
 
 ---
@@ -290,3 +310,5 @@ These are intentional shortcuts for a prototype, not oversights.
 **No authentication.** Any request can access any session. In production: agent login, session ownership, full audit log.
 
 **Garage availability is a static flag.** `open_now_override` boolean per record. In production: real-time availability feed from a dispatch system.
+
+**Onward-travel-only dispatch requires operator intervention.** The system defaults `recovery_action` to `tow` or `mobile_repair` based on the `vehicle_drivable` flag. There is no intake signal for "vehicle already handled elsewhere - customer only needs transport." The operator can set `recovery_action` to `none` on the action card to produce this outcome, but the system won't reach it automatically. Adding a dedicated intake field for this case was considered and left out of scope: the case is edge-rare and classifying it from noisy speech adds a new failure mode.

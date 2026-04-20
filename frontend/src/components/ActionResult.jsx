@@ -44,29 +44,53 @@ function ApproveBar({ mode, onApprove, onRetry }) {
   )
 }
 
+const ONWARD_LABELS = {
+  hire_car: 'Hire Car',
+  rail: 'Rail Fare',
+  hotel: 'Hotel',
+  none: 'None',
+}
+
+const ONWARD_ICONS = {
+  hire_car: '🚗',
+  rail: '🚆',
+  hotel: '🏨',
+  none: '—',
+}
+
 export default function ActionResult({ state, data, extractedFields, mode, onApprove, onRetry }) {
-  const [editAction, setEditAction] = useState(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editRecovery, setEditRecovery] = useState('tow')
+  const [editOnward, setEditOnward] = useState('none')
   const [editGarageIdx, setEditGarageIdx] = useState(0)
   const customerLat = extractedFields?.location_lat
   const customerLng = extractedFields?.location_lng
 
-  const isEditing = state === 'pending' && mode === 'copilot' && editAction !== null
-
   const startEdit = () => {
-    setEditAction(data?.action || 'tow')
+    setEditRecovery(data?.recovery_action || 'tow')
+    setEditOnward(data?.onward_travel || 'none')
     setEditGarageIdx(0)
+    setIsEditing(true)
   }
-  const cancelEdit = () => { setEditAction(null) }
+  const cancelEdit = () => setIsEditing(false)
 
   const buildApproved = () => {
-    if (!isEditing) return data
     const selectedGarage = data?.top_garages?.[editGarageIdx] || data?.garage
-    return { ...data, action: editAction, garage: selectedGarage }
+    return { ...data, recovery_action: editRecovery, onward_travel: editOnward, garage: selectedGarage }
   }
 
-  const displayGarage = isEditing
+  const displayGarage = (isEditing && state === 'pending' && mode === 'copilot')
     ? (data?.top_garages?.[editGarageIdx] || data?.garage)
     : data?.garage
+
+  const showEdit = state === 'pending' && mode === 'copilot'
+
+  const recoveryAction = data?.recovery_action || 'none'
+  const onwardTravel = data?.onward_travel || 'none'
+  const onwardOptions = data?.onward_travel_options || []
+  const onwardSelectOptions = [...new Set([...onwardOptions, 'none'])]
+
+  const bothNone = recoveryAction === 'none' && onwardTravel === 'none'
 
   return (
     <div className="card">
@@ -86,38 +110,45 @@ export default function ActionResult({ state, data, extractedFields, mode, onApp
           </div>
         )}
 
-        {(state === 'success' || state === 'pending') && data && data.action === 'none' && (
+        {(state === 'success' || state === 'pending') && data && bothNone && (
           <div className="text-muted" style={{ padding: '8px 0' }}>
             No dispatch required - see SMS for next steps.
           </div>
         )}
 
-        {(state === 'success' || state === 'pending') && data && data.action !== 'none' && (
+        {(state === 'success' || state === 'pending') && data && !bothNone && (
           <>
-            <div className="action-header-row">
-              {isEditing ? (
+            {/* Row 1: Recovery dispatch */}
+            <div className="field-label" style={{ marginBottom: 4 }}>Recovery dispatch</div>
+            <div className="action-header-row" style={{ marginBottom: 10 }}>
+              {showEdit && isEditing ? (
                 <select
                   className="edit-select"
-                  value={editAction}
-                  onChange={e => setEditAction(e.target.value)}
+                  value={editRecovery}
+                  onChange={e => setEditRecovery(e.target.value)}
                 >
                   <option value="tow">Tow Required</option>
                   <option value="mobile_repair">Mobile Repair</option>
+                  <option value="none">No recovery</option>
                 </select>
               ) : (
                 <>
-                  <span style={{ fontSize: 20 }}>{data.action === 'tow' ? '🚛' : '🔧'}</span>
+                  <span style={{ fontSize: 20 }}>
+                    {recoveryAction === 'tow' ? '🚛' : recoveryAction === 'mobile_repair' ? '🔧' : '—'}
+                  </span>
                   <div className="action-type">
-                    {data.action === 'tow' ? 'Tow Required' : 'Mobile Repair'}
+                    {recoveryAction === 'tow' ? 'Tow Required' : recoveryAction === 'mobile_repair' ? 'Mobile Repair' : 'No recovery'}
                   </div>
                 </>
               )}
-              <span style={{ fontSize: 13, color: 'var(--yellow)', marginLeft: 'auto' }}>
-                ETA ~{data.estimated_response_minutes} min
-              </span>
+              {recoveryAction !== 'none' && (
+                <span style={{ fontSize: 13, color: 'var(--yellow)', marginLeft: 'auto' }}>
+                  ETA ~{data.estimated_response_minutes} min
+                </span>
+              )}
             </div>
 
-            {isEditing && data.top_garages?.length > 1 && (
+            {showEdit && isEditing && data.top_garages?.length > 1 && (editRecovery === 'tow' || editRecovery === 'mobile_repair') && (
               <div style={{ marginBottom: 10 }}>
                 <div className="field-label" style={{ marginBottom: 4 }}>Select garage</div>
                 <select
@@ -134,8 +165,8 @@ export default function ActionResult({ state, data, extractedFields, mode, onApp
               </div>
             )}
 
-            {displayGarage && (
-              <div className="garage-info">
+            {displayGarage && ((!isEditing && recoveryAction !== 'none') || (isEditing && (editRecovery === 'tow' || editRecovery === 'mobile_repair'))) && (
+              <div className="garage-info" style={{ marginBottom: 10 }}>
                 <div className="garage-name">{displayGarage.name}</div>
                 <div className="garage-meta">
                   <span>{displayGarage.distance_miles} miles</span>
@@ -144,17 +175,33 @@ export default function ActionResult({ state, data, extractedFields, mode, onApp
               </div>
             )}
 
-            {data.additional_services?.length > 0 && (
-              <ul className="services-list" style={{ marginBottom: 10 }}>
-                {data.additional_services.map((s, i) => <li key={i}>{s}</li>)}
-              </ul>
-            )}
+            {/* Row 2: Onward travel */}
+            <div className="field-label" style={{ marginBottom: 4, marginTop: 4 }}>Onward travel</div>
+            <div className="action-header-row" style={{ marginBottom: 10 }}>
+              {showEdit && isEditing ? (
+                <select
+                  className="edit-select"
+                  value={editOnward}
+                  onChange={e => setEditOnward(e.target.value)}
+                >
+                  {onwardSelectOptions.map(opt => (
+                    <option key={opt} value={opt}>{ONWARD_LABELS[opt] || opt}</option>
+                  ))}
+                  {!onwardSelectOptions.includes('none') && <option value="none">None</option>}
+                </select>
+              ) : (
+                <>
+                  <span style={{ fontSize: 20 }}>{ONWARD_ICONS[onwardTravel] || '—'}</span>
+                  <div className="action-type">{ONWARD_LABELS[onwardTravel] || onwardTravel}</div>
+                </>
+              )}
+            </div>
 
             {data.reasoning && (
               <div className="reasoning-text" style={{ marginBottom: 10 }}>{data.reasoning}</div>
             )}
 
-            {displayGarage?.lat && customerLat && (
+            {displayGarage?.lat && customerLat && recoveryAction !== 'none' && (
               <div className="map-container">
                 <MapContainer
                   center={[displayGarage.lat, displayGarage.lng]}
@@ -179,7 +226,7 @@ export default function ActionResult({ state, data, extractedFields, mode, onApp
 
             {(state === 'success' || state === 'pending') && (
               <div style={{ marginTop: 8 }}>
-                {isEditing ? (
+                {showEdit && isEditing ? (
                   <div className="approve-bar">
                     <button className="approve-btn" onClick={() => { onApprove(buildApproved()); cancelEdit() }}>
                       Approve
@@ -198,9 +245,9 @@ export default function ActionResult({ state, data, extractedFields, mode, onApp
                     onRetry={onRetry}
                   />
                 )}
-                {state === 'pending' && mode === 'copilot' && !isEditing && (
+                {showEdit && !isEditing && (
                   <button className="edit-toggle-btn" onClick={startEdit} style={{ marginTop: 6 }}>
-                    Edit garage / action
+                    Edit dispatch
                   </button>
                 )}
               </div>
