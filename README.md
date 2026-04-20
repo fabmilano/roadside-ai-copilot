@@ -200,7 +200,10 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       └── test_core.py     # 70 unit tests (LLM and embedding calls mocked)
+│       ├── test_core.py     # 70 unit tests (LLM and embedding calls mocked)
+│       └── stress/          # End-to-end demo scripts (require live server + API key)
+│           ├── test_demo_cases_1.py  # Cases A-D (Carter, Barnes, Stone, Mitchell)
+│           └── test_demo_cases_2.py  # Cases E-H (Wilson, Clark, Foster, Bradley)
 │
 └── frontend/
     └── src/
@@ -227,14 +230,14 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 
 | Name | Policy | Tier | Demo notes |
 |---|---|---|---|
-| Sarah Mitchell | ALC-10042 | Gold | Standard golden-path customer |
-| James Carter | ALC-20187 | Bronze | Minimal cover - local recovery only |
-| Laura Barnes | ALC-30295 | Gold | Non-drivable; LLM should include onward travel from policy |
-| David Wilson | ALC-40318 | Silver | Home Start included |
-| Emma Clark | ALC-50421 | Gold | Good for vehicle mismatch demo |
-| Mark Stone | ALC-60099 | Bronze | Customer notes flag Uber/commercial use; LLM should deny |
-| Claire Foster | ALC-70512 | Silver | |
-| Tom Bradley | ALC-80634 | Gold | Tesla Model 3 - routes to EV-capable garages |
+| Sarah Mitchell | ALC-10042 | Gold | Flat battery - mobile_repair dispatch |
+| James Carter | ALC-20187 | Bronze | Breakdown - tow only (Bronze has no onward travel) |
+| Laura Barnes | ALC-30295 | Gold | Motorway breakdown - tow + hire_car (Gold onward travel) |
+| David Wilson | ALC-40318 | Silver | Breakdown - tow, no onward travel (Silver excludes it) |
+| Emma Clark | ALC-50421 | Gold | Accident - coverage denied (policy excludes collisions) |
+| Mark Stone | ALC-60099 | Bronze | Commercial/Uber use - denied via customer notes flag |
+| Claire Foster | ALC-70512 | Silver | Key lockout - denied (policy excludes lockouts) |
+| Tom Bradley | ALC-80634 | Gold | Tesla EV battery flat - mobile_repair, EV-capable garage |
 
 **Garages** - 10 records across UK cities (Manchester, Birmingham, Edinburgh, Leeds, Bristol, London x2, Glasgow, Cardiff). Each has a `capabilities` list (`mechanical`, `electrical`, `tyre`, `battery`, `ev`, `bodywork`) and a `has_tow_truck` flag.
 
@@ -267,13 +270,23 @@ npm run dev
 
 Open `http://localhost:5173`. Backend must be running on port 8000.
 
-**Tests**
+**Unit tests**
 
 ```bash
 cd backend
 pytest
 # 70 tests - LLM and embedding calls are mocked throughout
 ```
+
+**End-to-end stress tests** (require live server and API key)
+
+```bash
+cd backend
+.venv/bin/python tests/stress/test_demo_cases_1.py   # cases A-D
+.venv/bin/python tests/stress/test_demo_cases_2.py   # cases E-H
+```
+
+These drive full WebSocket + HTTP sessions and assert against actual LLM responses. Paced at 2.5 s per turn and 30 s between cases to stay within free-tier API limits.
 
 ---
 

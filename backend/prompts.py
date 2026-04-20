@@ -42,7 +42,7 @@ After each message from the customer, respond with a JSON object containing exac
     "vehicle_year": "value or null",
     "vehicle_reg": "value or null",
     "location_description": "value or null",
-    "incident_type": "one of: breakdown | flat_battery | flat_tyre | fuel | accident | key_issue | other | null",
+    "incident_type": "one of: breakdown | flat_battery | flat_tyre | fuel | accident | key_issue | other | null. Use flat_battery for any battery issue including EV high-voltage battery or battery management faults.",
     "incident_description": "value or null",
     "vehicle_drivable": "true/false/null",
     "is_safe": "true/false/null",
