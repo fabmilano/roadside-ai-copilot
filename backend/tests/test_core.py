@@ -24,16 +24,16 @@ from session import create_session, get_session, sessions
 
 class TestCustomerLookup:
     def test_find_known_customer(self):
-        customer = find_customer("ALZ-10042")
+        customer = find_customer("ALC-10042")
         assert customer is not None
         assert customer["name"] == "Sarah Mitchell"
         assert customer["tier"] == "gold"
 
     def test_find_unknown_customer_returns_none(self):
-        assert find_customer("ALZ-99999") is None
+        assert find_customer("ALC-99999") is None
 
     def test_find_commercial_customer(self):
-        customer = find_customer("ALZ-60099")
+        customer = find_customer("ALC-60099")
         assert customer is not None
         assert "notes" in customer
         assert "commercial" in customer["notes"].lower()
@@ -46,7 +46,7 @@ class TestCustomerLookup:
     def test_find_with_spelled_out_prefix(self):
         customer = find_customer("A L Z 1 0 0 4 2")
         assert customer is not None
-        assert customer["policy_number"] == "ALZ-10042"
+        assert customer["policy_number"] == "ALC-10042"
 
     def test_no_gold_plus_tier_in_customers(self):
         """Gold Plus has been removed - no customer should still carry that tier."""
@@ -139,16 +139,16 @@ class TestFieldValidators:
 
 class TestNormalizePolicyNumber:
     def test_canonical_format_unchanged(self):
-        assert normalize_policy_number("ALZ-10042") == "ALZ-10042"
+        assert normalize_policy_number("ALC-10042") == "ALC-10042"
 
     def test_bare_digits_prefixed(self):
-        assert normalize_policy_number("10042") == "ALZ-10042"
+        assert normalize_policy_number("10042") == "ALC-10042"
 
     def test_spaced_digits(self):
-        assert normalize_policy_number("1 0 0 4 2") == "ALZ-10042"
+        assert normalize_policy_number("1 0 0 4 2") == "ALC-10042"
 
     def test_lowercase_and_no_dash(self):
-        assert normalize_policy_number("alz 10042") == "ALZ-10042"
+        assert normalize_policy_number("alz 10042") == "ALC-10042"
 
     def test_empty_returns_none(self):
         assert normalize_policy_number("") is None

@@ -223,7 +223,7 @@ export default function App() {
   return (
     <>
       <div className="header">
-        <h1>ALLIANZ ROADSIDE CO-PILOT</h1>
+        <h1>ALLIANCE ROADSIDE CO-PILOT</h1>
         <ModeToggle mode={mode} onChange={handleModeChange} />
         <div className="header-right">
           <PipelineStatus stage={pipelineStage} />

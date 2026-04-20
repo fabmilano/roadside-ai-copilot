@@ -114,7 +114,7 @@ The intake LLM receives a state snapshot per turn, not the full conversation his
 ```
 KNOWN SO FAR:
 - customer_name: Sarah Mitchell
-- policy_number: ALZ-10042
+- policy_number: ALC-10042
 ...
 YOUR PREVIOUS REPLY: ...
 SYSTEM NOTE: ...
@@ -227,14 +227,14 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 
 | Name | Policy | Tier | Demo notes |
 |---|---|---|---|
-| Sarah Mitchell | ALZ-10042 | Gold | Standard golden-path customer |
-| James Carter | ALZ-20187 | Bronze | Minimal cover - local recovery only |
-| Laura Barnes | ALZ-30295 | Gold | Non-drivable; LLM should include onward travel from policy |
-| David Wilson | ALZ-40318 | Silver | Home Start included |
-| Emma Clark | ALZ-50421 | Gold | Good for vehicle mismatch demo |
-| Mark Stone | ALZ-60099 | Bronze | Customer notes flag Uber/commercial use; LLM should deny |
-| Claire Foster | ALZ-70512 | Silver | |
-| Tom Bradley | ALZ-80634 | Gold | Tesla Model 3 - routes to EV-capable garages |
+| Sarah Mitchell | ALC-10042 | Gold | Standard golden-path customer |
+| James Carter | ALC-20187 | Bronze | Minimal cover - local recovery only |
+| Laura Barnes | ALC-30295 | Gold | Non-drivable; LLM should include onward travel from policy |
+| David Wilson | ALC-40318 | Silver | Home Start included |
+| Emma Clark | ALC-50421 | Gold | Good for vehicle mismatch demo |
+| Mark Stone | ALC-60099 | Bronze | Customer notes flag Uber/commercial use; LLM should deny |
+| Claire Foster | ALC-70512 | Silver | |
+| Tom Bradley | ALC-80634 | Gold | Tesla Model 3 - routes to EV-capable garages |
 
 **Garages** - 10 records across UK cities (Manchester, Birmingham, Edinburgh, Leeds, Bristol, London x2, Glasgow, Cardiff). Each has a `capabilities` list (`mechanical`, `electrical`, `tyre`, `battery`, `ev`, `bodywork`) and a `has_tow_truck` flag.
 

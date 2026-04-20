@@ -451,7 +451,7 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
                         session["policy_validation_note"] = (
                             f"The policy number '{raw_policy}' was not found in our records. "
                             "Apologise, explain that you could not locate that policy, and ask the "
-                            "customer to repeat it - the 5-digit number is fine, no need to say 'ALZ'. "
+                            "customer to repeat it - the 5-digit number is fine, no need to say 'ALC'. "
                             "Do NOT set intake_complete to true yet."
                         )
                         extracted["intake_complete"] = False

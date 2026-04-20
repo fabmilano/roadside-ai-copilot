@@ -59,15 +59,15 @@ def load_policy(tier: str) -> str:
 
 
 def normalize_policy_number(raw) -> str | None:
-    """Extract digits from the input and reconstruct as ALZ-XXXXX.
-    Accepts 'ALZ-10042', '10042', 'alz 10042', 'A L Z 1 0 0 4 2', etc.
+    """Extract digits from the input and reconstruct as ALC-XXXXX.
+    Accepts 'ALC-10042', '10042', 'alz 10042', 'A L Z 1 0 0 4 2', etc.
     Returns None if no digits are found."""
     if raw is None:
         return None
     digits = re.sub(r"\D", "", str(raw))
     if not digits:
         return None
-    return f"ALZ-{digits}"
+    return f"ALC-{digits}"
 
 
 def find_customer(policy_number: str) -> dict | None:
