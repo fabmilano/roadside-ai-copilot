@@ -77,12 +77,17 @@ body {
 .right-panel {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: scroll;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
+
+.right-panel::-webkit-scrollbar { width: 6px; }
+.right-panel::-webkit-scrollbar-track { background: transparent; }
+.right-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.right-panel::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* Pipeline status bar */
 .pipeline-bar {
@@ -459,7 +464,7 @@ body {
 }
 
 .map-container {
-  height: 200px;
+  height: 160px;
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border);
