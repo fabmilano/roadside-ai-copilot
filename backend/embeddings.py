@@ -173,6 +173,19 @@ class PolicyIndex:
         scored.sort(key=lambda x: x[0], reverse=True)
         top_sections = [s for _, s in scored[:TOP_K]]
 
+        # When the vehicle is not drivable, always include the onward-travel
+        # section if the tier has one — it ranks poorly against incident-focused
+        # queries but is directly relevant and must not be silently omitted.
+        if drivable is False:
+            onward_title = "Onward travel when the vehicle cannot be driven"
+            onward_section = next(
+                (s for i, s in enumerate(self.sections)
+                 if s["tier"] == tier and s["section_title"] == onward_title),
+                None,
+            )
+            if onward_section and onward_section not in top_sections:
+                top_sections.append(onward_section)
+
         # --- LLM decision: read the policy excerpts and decide ---------------
         excerpts = "\n\n---\n\n".join(
             f"### {s['section_title']}\n\n{s['prose']}"

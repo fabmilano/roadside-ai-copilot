@@ -209,7 +209,11 @@ def select_action(
             "reasoning": "No garages found within range.",
         }
 
-    needs_tow = drivable is False
+    # Incidents that an engineer can fix at the roadside don't need a tow even
+    # when the vehicle is currently immobile (battery flat, fuel empty, etc.).
+    _MOBILE_REPAIR_TYPES = {"flat_battery", "flat_tyre", "fuel", "key_issue"}
+    fixable_at_scene = (incident_type or "").lower() in _MOBILE_REPAIR_TYPES
+    needs_tow = drivable is False and not fixable_at_scene
     required_cap = _required_capability(incident_type)
 
     def _eligible(g):
