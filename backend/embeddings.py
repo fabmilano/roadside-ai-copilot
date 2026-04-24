@@ -27,6 +27,10 @@ DATA_DIR = Path(__file__).parent / "data"
 CACHE_PATH = Path(__file__).parent / ".embedding_cache.json"
 CONFIDENCE_FLOOR = 0.50
 TOP_K = 4
+ONWARD_TRAVEL_QUERY = (
+    "onward travel replacement vehicle hire car rail train hotel "
+    "accommodation taxi when vehicle cannot be driven non-drivable"
+)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -105,6 +109,7 @@ class PolicyIndex:
     def __init__(self):
         self.sections: list[dict] = []
         self.embeddings: list[list[float]] = []
+        self.onward_travel_vec: list[float] = []
         self.ready = False
 
     async def build(self):
@@ -121,15 +126,23 @@ class PolicyIndex:
                 cached = json.loads(CACHE_PATH.read_text())
                 if cached.get("key") == key:
                     self.embeddings = cached["embeddings"]
-                    self.ready = True
-                    return
+                    self.onward_travel_vec = cached.get("onward_travel_vec", [])
+                    if self.onward_travel_vec:
+                        self.ready = True
+                        return
             except Exception:
                 pass
 
         texts = [f"{s['section_title']}\n{s.get('prose', '')}" for s in self.sections]
-        self.embeddings = await get_embeddings(texts)
+        all_vecs = await get_embeddings(texts + [ONWARD_TRAVEL_QUERY])
+        self.embeddings = all_vecs[:-1]
+        self.onward_travel_vec = all_vecs[-1]
         try:
-            CACHE_PATH.write_text(json.dumps({"key": key, "embeddings": self.embeddings}))
+            CACHE_PATH.write_text(json.dumps({
+                "key": key,
+                "embeddings": self.embeddings,
+                "onward_travel_vec": self.onward_travel_vec,
+            }))
         except Exception:
             pass
         self.ready = True
@@ -173,18 +186,21 @@ class PolicyIndex:
         scored.sort(key=lambda x: x[0], reverse=True)
         top_sections = [s for _, s in scored[:TOP_K]]
 
-        # When the vehicle is not drivable, always include the onward-travel
-        # section if the tier has one — it ranks poorly against incident-focused
-        # queries but is directly relevant and must not be silently omitted.
-        if drivable is False:
-            onward_title = "Onward travel when the vehicle cannot be driven"
-            onward_section = next(
-                (s for i, s in enumerate(self.sections)
-                 if s["tier"] == tier and s["section_title"] == onward_title),
-                None,
-            )
-            if onward_section and onward_section not in top_sections:
-                top_sections.append(onward_section)
+        # When the vehicle is not drivable, pin the most semantically relevant
+        # onward-travel section. Incident queries ("engine died") score poorly
+        # against travel/accommodation language, so we use a dedicated synthetic
+        # query embedding to find it instead of relying on exact title matching.
+        if drivable is False and self.onward_travel_vec:
+            onward_scored = [
+                (_cosine(self.onward_travel_vec, self.embeddings[i]), self.sections[i])
+                for i in tier_indices
+                if i < len(self.embeddings)
+            ]
+            onward_scored.sort(key=lambda x: x[0], reverse=True)
+            if onward_scored:
+                best = onward_scored[0][1]
+                if best not in top_sections:
+                    top_sections.append(best)
 
         # --- LLM decision: read the policy excerpts and decide ---------------
         excerpts = "\n\n---\n\n".join(

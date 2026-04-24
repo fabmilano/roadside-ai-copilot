@@ -20,7 +20,7 @@ BASE = "http://localhost:8765"
 WS_BASE = "ws://localhost:8765"
 
 INTER_TURN_PAUSE = 2.5   # seconds between each WebSocket send (respects 5 RPM)
-INTER_CASE_PAUSE = 30    # seconds between cases (let quota window reset)
+INTER_CASE_PAUSE = 120   # seconds between cases (free-tier 5 RPM limit)
 
 
 async def send_receive(ws, text, timeout=45):

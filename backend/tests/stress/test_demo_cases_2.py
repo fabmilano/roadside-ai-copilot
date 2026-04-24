@@ -17,7 +17,7 @@ BASE = "http://localhost:8765"
 WS_BASE = "ws://localhost:8765"
 
 INTER_TURN_PAUSE = 2.5
-INTER_CASE_PAUSE = 30
+INTER_CASE_PAUSE = 120
 
 
 async def send_receive(ws, text, timeout=45):
