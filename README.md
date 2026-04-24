@@ -14,7 +14,7 @@ The distinction matters: observation alone isn't leverage. This prototype goes f
 - SMS wording can be legally sensitive. The agent should own what gets sent.
 - An agent who notices an error mid-flow should be able to fix it, not just flag it.
 
-**Autopilot mode** runs the same pipeline end-to-end with all stages auto-approved. It's available for low-risk cases or demos, and can be toggled mid-session (which auto-approves any pending stage).
+**Co-pilot is the default.** New sessions start with operator approval required at every stage. **Autopilot mode** runs the same pipeline end-to-end with all stages auto-approved - it's available via a toggle for low-risk cases or demos, and switching mid-session auto-approves any pending stage.
 
 ---
 
@@ -67,7 +67,7 @@ This is the most important design decision in the system. LLMs are good at langu
 
 ### Intake safety gates in more detail
 
-Five gates run as Python logic inside the WebSocket handler, not as LLM instructions. Any gate that fires overrides the LLM's reply:
+Six gates run as Python logic inside the WebSocket handler, not as LLM instructions. Most override the LLM's reply; the policy-confirmed note steers it:
 
 | Gate | Trigger | Behaviour |
 |---|---|---|
@@ -76,6 +76,7 @@ Five gates run as Python logic inside the WebSocket handler, not as LLM instruct
 | Name plausibility | 3-char prefix match of name tokens | Fail if zero token overlap; 3-strike abort |
 | Vehicle mismatch | Extracted reg doesn't match policy record | Reject mismatch, never leak the DB reg; 3-strike abort |
 | Required fields gate | Server-side check before `intake_complete` | LLM cannot close intake with missing required fields |
+| Policy-confirmed note | Policy validated against DB records | Persistent per-turn signal telling the LLM the policy is confirmed - prevents re-confirmation loops |
 
 Gate firings are surfaced to the operator console with opaque summaries - no policy specifics, no PII from the database.
 
@@ -95,11 +96,11 @@ Sending the whole policy to an LLM on every claim is expensive, and a general-pu
 
 The policy documents (`backend/data/policy_*.md`) are plain markdown - section headers and prose paragraphs, written the way a product team would write them. No machine-readable metadata, no trigger tables.
 
-**Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity.
+**Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. When the vehicle is not drivable, a separate semantic pinning pass runs: a pre-embedded synthetic query about onward travel is compared against the tier's sections, and the best match is appended if it wasn't already in the top 4. This ensures onward-travel entitlements are surfaced even though incident-focused language ("engine seized") scores poorly against travel/accommodation prose.
 
 **Step 2 - LLM decision**: the retrieved sections are passed to the LLM as verbatim policy prose, alongside the claim details. The LLM reads them and returns a structured JSON decision: `covered`, `services_entitled`, the applicable section title, reasoning, and verbatim citations. The prompt instructs the LLM to use only the provided excerpts and not invent services.
 
-**What the embeddings actually do**: they narrow the policy down to the handful of sections relevant to this specific claim before the LLM reads anything. At demo scale (24 sections across 3 small files) you could skip embeddings and send the whole tier file to the LLM - the pattern earns its keep at production scale, where the policy is a 200-page document.
+**What the embeddings actually do**: they narrow the policy down to the handful of sections relevant to this specific claim before the LLM reads anything. At demo scale (25 sections across 3 small files) you could skip embeddings and send the whole tier file to the LLM - the pattern earns its keep at production scale, where the policy is a 200-page document.
 
 **What the LLM adds over embeddings alone**: judgment. Two sections might be semantically similar to the incident description, but only one actually applies. More importantly, the LLM catches cross-field reasoning that embeddings can't: a claim description that says "my car broke down" ranks low against the "commercial use exclusion" section by cosine similarity, but the LLM reads the customer notes field ("Uber driver - commercial use") alongside that exclusion prose and denies coverage correctly.
 
@@ -164,8 +165,8 @@ Each claim has two parallel dispatch outputs, both shown on the action card and 
 
 | Slot | Values | Derived from |
 |---|---|---|
-| `recovery_action` | `tow` / `mobile_repair` / `none` | `vehicle_drivable` flag + coverage outcome |
-| `onward_travel` | `hire_car` / `rail` / `hotel` / `none` | Coverage `services_entitled` when vehicle is not drivable |
+| `recovery_action` | `tow` / `mobile_repair` / `none` | `vehicle_drivable` flag + `incident_type` (roadside-fixable types like flat_battery always get mobile_repair) |
+| `onward_travel` | `hire_car` / `rail` / `hotel` / `none` | Coverage `services_entitled` keywords, only when vehicle needs towing |
 
 This maps directly to the four outcomes in the brief:
 
@@ -286,7 +287,7 @@ cd backend
 .venv/bin/python tests/stress/test_demo_cases_2.py   # cases E-H
 ```
 
-These drive full WebSocket + HTTP sessions and assert against actual LLM responses. Paced at 2.5 s per turn and 30 s between cases to stay within free-tier API limits.
+These drive full WebSocket + HTTP sessions and assert against actual LLM responses. Paced at 2.5 s per turn and 120 s between cases to stay within free-tier API limits.
 
 ---
 
@@ -312,7 +313,7 @@ These are intentional shortcuts for a prototype, not oversights.
 
 **Commercial exclusion is now soft, not hard.** The previous design used a deterministic keyword scan on `customer.notes` to deny commercial-use claims. Now the LLM reads the notes and the exclusion prose and decides. This is more natural and handles novel phrasings, but it is probabilistic. For a production system handling fraud risk, this rule should probably be re-hardened.
 
-**Embeddings are underused at this scale.** With 24 short sections across 3 small policy files, sending the full tier policy to the LLM would work fine and skip the retrieval step entirely. The embedding pattern is included because it is the right approach at production scale (a full policy document), and because it demonstrates the RAG pattern - but it is not strictly necessary here.
+**Embeddings are underused at this scale.** With 25 short sections across 3 small policy files, sending the full tier policy to the LLM would work fine and skip the retrieval step entirely. The embedding pattern is included because it is the right approach at production scale (a full policy document), and because it demonstrates the RAG pattern - but it is not strictly necessary here.
 
 **Voice is simulated.** Web Speech API (browser STT) and browser TTS. In production: WebRTC + a streaming STT/TTS provider.
 
