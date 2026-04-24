@@ -84,7 +84,7 @@ def _store_proposed(session: dict, stage: str, result: dict) -> bool:
     session["stage_approvals"][stage]["proposed"] = result
     session["stage_approvals"][stage]["edited"] = None
     session["stage_approvals"][stage]["status"] = "proposed"
-    if session.get("mode", "autopilot") == "autopilot":
+    if session.get("mode", "copilot") == "autopilot":
         session["stage_approvals"][stage]["status"] = "approved"
         return True
     return False
@@ -99,7 +99,7 @@ async def start_session(request: Request):
         pass
     session_id = str(uuid.uuid4())
     create_session(session_id)
-    mode = body.get("mode", "autopilot")
+    mode = body.get("mode", "copilot")
     if mode in ("autopilot", "copilot"):
         sessions[session_id]["mode"] = mode
     return {"session_id": session_id}
@@ -119,7 +119,7 @@ async def set_mode(session_id: str, request: Request):
     if not session:
         return JSONResponse(status_code=404, content={"error": "Session not found"})
     body = await request.json()
-    new_mode = body.get("mode", "autopilot")
+    new_mode = body.get("mode", "copilot")
     if new_mode not in ("autopilot", "copilot"):
         return JSONResponse(status_code=400, content={"error": "mode must be autopilot or copilot"})
     session["mode"] = new_mode
@@ -809,7 +809,7 @@ async def notify(session_id: str):
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
         sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
-        auto_approved = session.get("mode", "autopilot") == "autopilot"
+        auto_approved = session.get("mode", "copilot") == "autopilot"
         result = {
             "sms_text": sms_text,
             "sms_parts": parts if isinstance(parts, dict) else {},
@@ -833,7 +833,7 @@ async def notify(session_id: str):
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
         sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
-        auto_approved = session.get("mode", "autopilot") == "autopilot"
+        auto_approved = session.get("mode", "copilot") == "autopilot"
         result = {
             "sms_text": sms_text,
             "sms_parts": parts if isinstance(parts, dict) else {},
@@ -875,7 +875,7 @@ Return the JSON SMS object now."""
         return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
 
     sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
-    auto_approved = session.get("mode", "autopilot") == "autopilot"
+    auto_approved = session.get("mode", "copilot") == "autopilot"
     result = {
         "sms_text": sms_text,
         "sms_parts": parts if isinstance(parts, dict) else {},

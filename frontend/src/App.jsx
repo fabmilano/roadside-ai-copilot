@@ -20,11 +20,11 @@ export default function App() {
   const [coverage, setCoverage] = useState(cardState(IDLE, null))
   const [action, setAction] = useState(cardState(IDLE, null))
   const [sms, setSms] = useState(cardState(IDLE, null))
-  const [mode, setModeState] = useState('autopilot')
+  const [mode, setModeState] = useState('copilot')
   const [gates, setGates] = useState([])
   const [intakeComplete, setIntakeComplete] = useState(false)
   const pipelineRunning = useRef(false)
-  const modeRef = useRef('autopilot')
+  const modeRef = useRef('copilot')
 
   const setMode = (m) => { modeRef.current = m; setModeState(m) }
 

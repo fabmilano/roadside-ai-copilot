@@ -35,7 +35,7 @@ def create_session(session_id: str):
         "customer_not_found": False,
         "vehicle_mismatch_abort": False,
         "vehicle_mismatch_attempts": 0,
-        "mode": "autopilot",
+        "mode": "copilot",
         "stage_approvals": {
             "coverage": {"status": "idle", "proposed": None, "edited": None},
             "action":   {"status": "idle", "proposed": None, "edited": None},
