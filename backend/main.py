@@ -242,6 +242,23 @@ async def voice_endpoint(websocket: WebSocket, session_id: str):
                     "Do not ask for vehicle details, location, or any other information. "
                     "Do NOT set intake_complete."
                 )
+            # Persistent policy-CONFIRMED signal (counterpart to the unconfirmed gate above).
+            # Once the policy has been validated against records, tell the LLM every turn
+            # that the policy is confirmed - without this, the LLM sees policy_number
+            # populated in state but has no signal it was DB-verified, and follows the
+            # STRICT ORDER rule conservatively by re-asking ("Is that correct?" loops).
+            elif (
+                session.get("hydration_acknowledged")
+                and fields.get("policy_number")
+                and not session.get("customer_not_found")
+                and not session.get("vehicle_mismatch_abort")
+            ):
+                pending_note = (
+                    "The policy number has been CONFIRMED in our records. "
+                    "Do NOT re-ask the customer to confirm or repeat the policy number. "
+                    "Focus only on any intake details still marked '(not yet provided)', "
+                    "one question at a time."
+                )
 
             # Emergency note wins above everything; prepend it so it is seen first
             if emergency_note:
