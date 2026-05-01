@@ -27,19 +27,40 @@ if _api_key:
     os.environ.setdefault("GEMINI_API_KEY", _api_key)
 
 
-async def call_llm(system_prompt: str, user_message: str, response_format: str = "json") -> dict | str:
-    """Single LLM call with fallback chain. Returns parsed JSON dict or raw string."""
+async def call_llm(
+    system_prompt: str,
+    user_message: str,
+    response_format: str = "json",
+    response_schema: dict | None = None,
+) -> dict | str:
+    """Single LLM call with fallback chain. Returns parsed JSON dict or raw string.
+
+    When response_schema is provided, it is passed to the provider as a
+    server-side decoding constraint (Gemini response_schema / OpenAI json_schema).
+    The model is forced to produce tokens matching the schema, eliminating
+    parse failures for structured calls like coverage and SMS.
+    """
+
+    rf_param: dict | str | None = None
+    if response_schema:
+        rf_param = {
+            "type": "json_object",
+            "response_schema": response_schema,
+        }
 
     async def _attempt(model: str):
-        response = await litellm.acompletion(
-            model=model,
-            messages=[
+        kwargs: dict = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
-            temperature=0.3,
-            max_tokens=2000,
-        )
+            "temperature": 0.3,
+            "max_tokens": 2000,
+        }
+        if rf_param:
+            kwargs["response_format"] = rf_param
+        response = await litellm.acompletion(**kwargs)
         content = response.choices[0].message.content
         if response_format != "json":
             return content
@@ -52,13 +73,6 @@ async def call_llm(system_prompt: str, user_message: str, response_format: str =
     for model in MODEL_CHAIN:
         try:
             return await _attempt(model)
-        except (json.JSONDecodeError, ValueError) as e:
-            last_err = e
-            try:
-                return await _attempt(model)
-            except Exception as retry_err:
-                last_err = retry_err
-                continue
         except Exception as e:
             last_err = e
             continue

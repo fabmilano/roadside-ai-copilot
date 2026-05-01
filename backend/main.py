@@ -24,7 +24,10 @@ from coverage import (
 from embeddings import get_policy_index
 from llm import call_llm, call_llm_with_state
 from prompts import INTAKE_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
+from schemas import SmsParts
 from session import create_session, get_session, sessions
+
+_SMS_SCHEMA = SmsParts.model_json_schema()
 
 
 @asynccontextmanager
@@ -805,14 +808,14 @@ async def notify(session_id: str):
             "eta_line and services_line should be empty strings."
         )
         try:
-            parts = await call_llm(SMS_NOT_FOUND_SYSTEM_PROMPT, user_message, response_format="json")
+            parts = await call_llm(SMS_NOT_FOUND_SYSTEM_PROMPT, user_message, response_format="json", response_schema=_SMS_SCHEMA)
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
-        sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
+        sms_text = _assemble_sms(parts)
         auto_approved = session.get("mode", "copilot") == "autopilot"
         result = {
             "sms_text": sms_text,
-            "sms_parts": parts if isinstance(parts, dict) else {},
+            "sms_parts": parts,
             "case_ref": case_ref,
             "sent": auto_approved,
         }
@@ -829,14 +832,14 @@ async def notify(session_id: str):
             "Return the JSON SMS object for a not-found case."
         )
         try:
-            parts = await call_llm(SMS_NOT_FOUND_SYSTEM_PROMPT, user_message, response_format="json")
+            parts = await call_llm(SMS_NOT_FOUND_SYSTEM_PROMPT, user_message, response_format="json", response_schema=_SMS_SCHEMA)
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
-        sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
+        sms_text = _assemble_sms(parts)
         auto_approved = session.get("mode", "copilot") == "autopilot"
         result = {
             "sms_text": sms_text,
-            "sms_parts": parts if isinstance(parts, dict) else {},
+            "sms_parts": parts,
             "case_ref": case_ref,
             "sent": auto_approved,
         }
@@ -870,15 +873,15 @@ case_ref: {case_ref}
 Return the JSON SMS object now."""
 
     try:
-        parts = await call_llm(SMS_SYSTEM_PROMPT, user_message, response_format="json")
+        parts = await call_llm(SMS_SYSTEM_PROMPT, user_message, response_format="json", response_schema=_SMS_SCHEMA)
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e), "stage": "notify"})
 
-    sms_text = _assemble_sms(parts if isinstance(parts, dict) else {})
+    sms_text = _assemble_sms(parts)
     auto_approved = session.get("mode", "copilot") == "autopilot"
     result = {
         "sms_text": sms_text,
-        "sms_parts": parts if isinstance(parts, dict) else {},
+        "sms_parts": parts,
         "case_ref": case_ref,
         "sent": auto_approved,
     }

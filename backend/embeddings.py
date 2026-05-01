@@ -22,6 +22,7 @@ from pathlib import Path
 
 from llm import EMBEDDING_MODEL, call_llm, get_embedding, get_embeddings
 from prompts import COVERAGE_SYSTEM_PROMPT
+from schemas import CoverageResult
 
 DATA_DIR = Path(__file__).parent / "data"
 CACHE_PATH = Path(__file__).parent / ".embedding_cache.json"
@@ -222,12 +223,14 @@ class PolicyIndex:
         )
 
         try:
-            result = await call_llm(COVERAGE_SYSTEM_PROMPT, user_message, response_format="json")
+            result = await call_llm(
+                COVERAGE_SYSTEM_PROMPT,
+                user_message,
+                response_format="json",
+                response_schema=CoverageResult.model_json_schema(),
+            )
         except Exception as e:
             return _refer_to_operator(f"Coverage LLM call failed: {e}")
-
-        if not isinstance(result, dict):
-            return _refer_to_operator("Coverage LLM returned unexpected response format")
 
         confidence = float(result.get("confidence") or 0.0)
         if confidence < CONFIDENCE_FLOOR:
