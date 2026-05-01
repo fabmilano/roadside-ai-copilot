@@ -192,6 +192,7 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   ├── embeddings.py        # Policy section parser + embedding index + retrieval + LLM decision
 │   ├── action.py            # Haversine distance, garage finder, deterministic action selector
 │   ├── llm.py               # LLM client (fallback chain) + embedding client
+│   ├── schemas.py           # Pydantic models for coverage and SMS response schemas
 │   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, COVERAGE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
 │   ├── data/
 │   │   ├── customers.json   # 8 synthetic customers across 3 tiers
@@ -201,10 +202,11 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       ├── test_core.py     # 70 unit tests (LLM and embedding calls mocked)
+│       ├── test_core.py     # 82 unit tests (LLM and embedding calls mocked)
 │       └── stress/          # End-to-end demo scripts (require live server + API key)
 │           ├── test_demo_cases_1.py  # Cases A-D (Carter, Barnes, Stone, Mitchell)
-│           └── test_demo_cases_2.py  # Cases E-H (Wilson, Clark, Foster, Bradley)
+│           ├── test_demo_cases_2.py  # Cases E-H (Wilson, Clark, Foster, Bradley)
+│           └── test_demo_cases_3.py  # Schema enforcement verification (B, C, F, G)
 │
 └── frontend/
     └── src/
@@ -276,7 +278,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 70 tests - LLM and embedding calls are mocked throughout
+# 82 tests - LLM and embedding calls are mocked throughout
 ```
 
 **End-to-end stress tests** (require live server and API key)
