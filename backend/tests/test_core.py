@@ -605,3 +605,180 @@ class TestVehicleMismatchGate:
         _run_mismatch_gate(s, "456DEF")
         assert s.get("vehicle_mismatch_abort") is not True
         assert s["vehicle_mismatch_attempts"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 13. Schema enforcement passthrough
+# ---------------------------------------------------------------------------
+
+class TestSchemaPassthrough:
+    """Verify response_schema reaches litellm.acompletion as response_format."""
+
+    @pytest.mark.asyncio
+    async def test_response_schema_passed_to_litellm(self):
+        mock_response = AsyncMock()
+        mock_response.choices[0].message.content = '{"greeting": "Hi"}'
+        schema = {"type": "object", "properties": {"greeting": {"type": "string"}}}
+
+        with patch("litellm.acompletion", return_value=mock_response) as mock_call:
+            from llm import call_llm
+            await call_llm("sys", "user", response_format="json", response_schema=schema)
+
+        kwargs = mock_call.call_args
+        rf = kwargs.kwargs.get("response_format") or kwargs[1].get("response_format")
+        assert rf is not None
+        assert rf["type"] == "json_object"
+        assert rf["response_schema"] == schema
+
+    @pytest.mark.asyncio
+    async def test_no_schema_omits_response_format(self):
+        mock_response = AsyncMock()
+        mock_response.choices[0].message.content = '{"reply": "hi"}'
+
+        with patch("litellm.acompletion", return_value=mock_response) as mock_call:
+            from llm import call_llm
+            await call_llm("sys", "user", response_format="json")
+
+        kwargs = mock_call.call_args
+        rf = kwargs.kwargs.get("response_format")
+        assert rf is None
+
+    @pytest.mark.asyncio
+    async def test_auth_error_not_retried(self):
+        from litellm import AuthenticationError
+
+        with patch("litellm.acompletion", side_effect=AuthenticationError(
+            message="bad key", llm_provider="gemini", model="gemini/gemini-2.5-flash-lite",
+        )):
+            from llm import call_llm
+            with pytest.raises(AuthenticationError):
+                await call_llm("sys", "user", response_format="json")
+
+
+# ---------------------------------------------------------------------------
+# 14. Schema definitions
+# ---------------------------------------------------------------------------
+
+class TestSchemaDefinitions:
+    def test_coverage_schema_has_required_fields(self):
+        from schemas import CoverageResult
+        schema = CoverageResult.model_json_schema()
+        assert "properties" in schema
+        required = set(schema["required"])
+        expected = {"covered", "event_type", "applicable_section", "services_entitled",
+                    "exclusions_flagged", "reasoning", "citations", "confidence"}
+        assert required == expected
+
+    def test_sms_schema_has_required_fields(self):
+        from schemas import SmsParts
+        schema = SmsParts.model_json_schema()
+        assert "properties" in schema
+        required = set(schema["required"])
+        expected = {"greeting", "status_line", "action_line", "eta_line",
+                    "services_line", "case_ref_line", "emergency_footer"}
+        assert required == expected
+
+    def test_sms_schema_is_flat(self):
+        from schemas import SmsParts
+        schema = SmsParts.model_json_schema()
+        assert "$defs" not in schema
+        assert "$ref" not in str(schema)
+
+
+# ---------------------------------------------------------------------------
+# 15. SMS assembly
+# ---------------------------------------------------------------------------
+
+from main import _assemble_sms
+
+
+class TestSmsAssembly:
+    def test_assembles_all_fields(self):
+        parts = {
+            "greeting": "Hi Sarah,",
+            "status_line": "Your Gold policy covers this breakdown.",
+            "action_line": "We are arranging a tow.",
+            "eta_line": "ETA ~15 mins.",
+            "services_line": "Hire car for 24 hours.",
+            "case_ref_line": "Case: RA-2026-1234",
+            "emergency_footer": "For any emergency call 999.",
+        }
+        text = _assemble_sms(parts)
+        assert text.startswith("Hi Sarah,")
+        assert "RA-2026-1234" in text
+        assert text.endswith("For any emergency call 999.")
+
+    def test_skips_empty_fields(self):
+        parts = {
+            "greeting": "Hello,",
+            "status_line": "Not covered.",
+            "action_line": "",
+            "eta_line": "",
+            "services_line": "",
+            "case_ref_line": "Ref: RA-2026-0001",
+            "emergency_footer": "Call 999.",
+        }
+        text = _assemble_sms(parts)
+        assert "  " not in text
+        assert text == "Hello, Not covered. Ref: RA-2026-0001 Call 999."
+
+    def test_missing_keys_dont_crash(self):
+        text = _assemble_sms({"greeting": "Hi,"})
+        assert text == "Hi,"
+
+    def test_empty_dict(self):
+        assert _assemble_sms({}) == ""
+
+
+# ---------------------------------------------------------------------------
+# 16. Action dispatch short-circuits on undecided coverage
+# ---------------------------------------------------------------------------
+
+class TestActionCoverageShortCircuit:
+    def test_covered_none_returns_no_dispatch(self):
+        sid = "test-action-none-001"
+        sessions.pop(sid, None)
+        create_session(sid)
+        s = sessions[sid]
+        s["status"] = "action"
+        s["coverage_result"] = {
+            "covered": None,
+            "event_type": "unknown",
+            "services_entitled": [],
+            "reasoning": "Low confidence",
+            "confidence": 0.3,
+        }
+        s["customer_record"] = {"tier": "gold"}
+
+        from starlette.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.post(f"/api/next-action/{sid}")
+        data = resp.json()
+        assert data["recovery_action"] == "none"
+        assert data["onward_travel"] == "none"
+        assert data["auto_approved"] is True
+        sessions.pop(sid, None)
+
+    def test_covered_false_returns_no_dispatch(self):
+        sid = "test-action-false-001"
+        sessions.pop(sid, None)
+        create_session(sid)
+        s = sessions[sid]
+        s["status"] = "action"
+        s["coverage_result"] = {
+            "covered": False,
+            "event_type": "Commercial use exclusion",
+            "services_entitled": [],
+            "reasoning": "Denied",
+        }
+        s["customer_record"] = {"tier": "bronze"}
+
+        from starlette.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.post(f"/api/next-action/{sid}")
+        data = resp.json()
+        assert data["recovery_action"] == "none"
+        assert data["onward_travel"] == "none"
+        sessions.pop(sid, None)

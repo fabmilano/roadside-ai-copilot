@@ -723,9 +723,11 @@ async def next_action(session_id: str):
     if not coverage:
         return JSONResponse(status_code=422, content={"error": "Coverage check not yet completed", "stage": "action"})
 
-    # Short-circuit: no garage search needed when coverage is denied.
+    # Short-circuit: no garage search when coverage is denied or undecided.
     if coverage.get("covered") is False:
         return JSONResponse(_no_dispatch("No dispatch - incident not covered under policy. See SMS for next steps."))
+    if coverage.get("covered") is None:
+        return JSONResponse(_no_dispatch("No dispatch - coverage could not be determined. Referred to operator."))
 
     # Resolve location and find garages only for covered cases.
     location_desc = fields.get("location_description") or ""

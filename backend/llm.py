@@ -2,6 +2,7 @@ import json
 import os
 
 import litellm
+from litellm import AuthenticationError, BadRequestError, PermissionDeniedError
 
 DEFAULT_MODEL_CHAIN = [
     "gemini/gemini-2.5-flash-lite",
@@ -69,10 +70,14 @@ async def call_llm(
             content = content.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(content)
 
+    _NO_RETRY = (AuthenticationError, PermissionDeniedError, BadRequestError)
+
     last_err: Exception | None = None
     for model in MODEL_CHAIN:
         try:
             return await _attempt(model)
+        except _NO_RETRY:
+            raise
         except Exception as e:
             last_err = e
             continue
