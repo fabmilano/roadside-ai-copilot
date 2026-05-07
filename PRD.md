@@ -38,7 +38,7 @@ We start with co-pilot coverage because it's the highest-stakes component – a 
 
 **Non-determinism.** Same claim details can produce different coverage outcomes across calls. Consistency is both a regulatory requirement (FCA expects equivalent treatment) and an operator trust issue. Eval infrastructure must track decision variance, not just accuracy.
 
-**Retrieval doc complexity.** Real policy documents are a mix of PDFs with tables, figures, and legalese. Getting correct semantic chunks out of these requires specialized parsing and potentially tier-specific tuning.
+**Retrieval doc complexity.** Real policy documents are a mix of PDFs with tables, figures, and legalese. Getting correct semantic chunks out of these requires specialized parsing and potentially source-specific tuning.
 
 **Adversarial intake.** Server-side JSON masking limits injection surface, but adversarial input could still poison extracted fields that feed coverage decisions.
 
