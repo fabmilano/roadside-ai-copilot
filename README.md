@@ -98,7 +98,13 @@ The policy documents (`backend/data/policy_*.md`) are plain markdown - section h
 
 **Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. When the vehicle is not drivable, a separate semantic pinning pass runs: a pre-embedded synthetic query about onward travel is compared against the tier's sections, and the best match is appended if it wasn't already in the top 4. This ensures onward-travel entitlements are surfaced even though incident-focused language ("engine seized") scores poorly against travel/accommodation prose.
 
-**Step 2 - LLM decision**: the retrieved sections are passed to the LLM as verbatim policy prose, alongside the claim details. The LLM reads them and returns a structured JSON decision: `covered`, `services_entitled`, the applicable section title, reasoning, and verbatim citations. The prompt instructs the LLM to use only the provided excerpts and not invent services.
+**Step 2 - LLM decision**: the retrieved sections are passed to the LLM as verbatim policy prose, alongside the claim details. The LLM reads them and returns a structured JSON decision via constrained decoding (Pydantic schema compiled to a request-level constraint). Key fields are enum-constrained to canonical values that the downstream deterministic dispatch can match reliably:
+
+- `services_entitled`: one of 8 canonical names (`"Roadside Attempt"`, `"Hire Car"`, `"Hotel Accommodation"`, `"Rail Travel"`, etc.) - these feed directly into the action selector's keyword matching
+- `event_type`: one of 8 categories (`"Breakdown"`, `"Flat Battery"`, `"Accident"`, `"Commercial Use Exclusion"`, etc.)
+- `confidence`: float constrained to 0.0-1.0
+
+Free-text fields (`reasoning`, `citations`, `exclusions_flagged`) remain unconstrained since they're consumed by humans, not deterministic logic.
 
 **What the embeddings actually do**: they narrow the policy down to the handful of sections relevant to this specific claim before the LLM reads anything. At demo scale (25 sections across 3 small files) you could skip embeddings and send the whole tier file to the LLM - the pattern earns its keep at production scale, where the policy is a 200-page document.
 
@@ -166,7 +172,7 @@ Each claim has two parallel dispatch outputs, both shown on the action card and 
 | Slot | Values | Derived from |
 |---|---|---|
 | `recovery_action` | `tow` / `mobile_repair` / `none` | `vehicle_drivable` flag + `incident_type` (roadside-fixable types like flat_battery always get mobile_repair) |
-| `onward_travel` | `hire_car` / `rail` / `hotel` / `none` | Coverage `services_entitled` keywords, only when vehicle needs towing |
+| `onward_travel` | `hire_car` / `rail` / `hotel` / `none` | Coverage `services_entitled` enum values (constrained at decode time), only when vehicle needs towing |
 
 This maps directly to the four outcomes in the brief:
 
@@ -192,7 +198,7 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   ├── embeddings.py        # Policy section parser + embedding index + retrieval + LLM decision
 │   ├── action.py            # Haversine distance, garage finder, deterministic action selector
 │   ├── llm.py               # LLM client (fallback chain) + embedding client
-│   ├── schemas.py           # Pydantic models for coverage and SMS response schemas
+│   ├── schemas.py           # Pydantic models with enum constraints for coverage and SMS schemas
 │   ├── prompts.py           # INTAKE_SYSTEM_PROMPT, COVERAGE_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
 │   ├── data/
 │   │   ├── customers.json   # 8 synthetic customers across 3 tiers
@@ -202,7 +208,7 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       ├── test_core.py     # 82 unit tests (LLM and embedding calls mocked)
+│       ├── test_core.py     # 94 unit tests (LLM and embedding calls mocked)
 │       └── stress/          # End-to-end demo scripts (require live server + API key)
 │           ├── test_demo_cases_1.py  # Cases A-D (Carter, Barnes, Stone, Mitchell)
 │           ├── test_demo_cases_2.py  # Cases E-H (Wilson, Clark, Foster, Bradley)
@@ -278,7 +284,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 82 tests - LLM and embedding calls are mocked throughout
+# 94 tests - LLM and embedding calls are mocked throughout
 ```
 
 **End-to-end stress tests** (require live server and API key)
@@ -309,7 +315,7 @@ These are intentional shortcuts for a prototype, not oversights.
 
 **Coverage decisions are non-deterministic.** The LLM coverage call can return different results for the same claim on different runs, or be swayed by how the incident is phrased. A rule table is fully deterministic; this design trades that for flexibility and policy-grounding. The operator approval step is the human check on this.
 
-**LLM hallucination is mitigated but not eliminated.** The coverage prompt instructs the LLM to use only the provided policy excerpts and not invent services. In practice, a capable model follows this reliably - but it is an instruction, not a hard constraint. An operator reviewing the coverage card before approval is the backstop.
+**LLM hallucination is mitigated but not eliminated.** For structured fields that drive downstream logic (`services_entitled`, `event_type`), constrained decoding enforces canonical enum values at the token level - the LLM cannot invent a service name that doesn't exist. Free-text fields (`reasoning`, `citations`, `exclusions_flagged`) remain unconstrained and can still hallucinate. An operator reviewing the coverage card before approval is the backstop for those.
 
 **The confidence score is self-reported.** The `confidence` field in the coverage JSON is returned by the LLM itself, not computed from an external signal. It is a useful heuristic for the refer-to-operator floor, but it is not calibrated.
 

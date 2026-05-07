@@ -2,8 +2,8 @@
 Demo stress test round 2 - the 4 remaining customers.
 
 E. David Wilson   Silver  BMW 3 Series  Bristol       non-drivable breakdown  => tow + none
-F. Emma Clark     Gold    Honda Civic   London        accident non-drivable    => tow + hire_car
-G. Claire Foster  Silver  Qashqai       Leeds         key locked in car        => mobile_repair + none
+F. Emma Clark     Gold    Honda Civic   London        accident/collision       => denied (none + none)
+G. Claire Foster  Silver  Nissan Qashqai Leeds        key lockout              => denied (none + none)
 H. Tom Bradley    Gold    Tesla Model 3 London (East) EV battery fault         => mobile_repair + none
 """
 

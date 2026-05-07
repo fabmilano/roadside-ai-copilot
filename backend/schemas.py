@@ -1,4 +1,28 @@
-from pydantic import BaseModel
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, Field
+
+ServiceName = Literal[
+    "Roadside Attempt",
+    "Local Recovery",
+    "National Recovery",
+    "Home Start",
+    "Labour",
+    "Hire Car",
+    "Hotel Accommodation",
+    "Rail Travel",
+]
+
+EventType = Literal[
+    "Breakdown",
+    "Flat Battery",
+    "Flat Tyre",
+    "Fuel",
+    "Accident",
+    "Key Issue",
+    "Commercial Use Exclusion",
+    "Other",
+]
 
 
 class CoverageCitation(BaseModel):
@@ -8,13 +32,13 @@ class CoverageCitation(BaseModel):
 
 class CoverageResult(BaseModel):
     covered: bool | None
-    event_type: str
+    event_type: EventType
     applicable_section: str
-    services_entitled: list[str]
+    services_entitled: list[ServiceName]
     exclusions_flagged: list[str]
     reasoning: str
     citations: list[CoverageCitation]
-    confidence: float
+    confidence: Annotated[float, Field(ge=0.0, le=1.0)]
 
 
 class SmsParts(BaseModel):

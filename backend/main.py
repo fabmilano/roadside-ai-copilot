@@ -21,7 +21,7 @@ from coverage import (
     normalize_vehicle_reg,
     validate_incident_type,
 )
-from embeddings import get_policy_index
+from embeddings import CONFIDENCE_FLOOR, get_policy_index
 from llm import call_llm, call_llm_with_state
 from prompts import INTAKE_SYSTEM_PROMPT, SMS_NOT_FOUND_SYSTEM_PROMPT, SMS_SYSTEM_PROMPT
 from schemas import SmsParts
@@ -82,12 +82,18 @@ def _log_gate(session: dict, gate_type: str, summary: str):
     })
 
 
-def _store_proposed(session: dict, stage: str, result: dict) -> bool:
-    """Store result as proposed. Returns True if auto-approved (autopilot mode)."""
+def _store_proposed(session: dict, stage: str, result: dict, confidence_floor: float | None = None) -> bool:
+    """Store result as proposed. Returns True if auto-approved (autopilot mode).
+
+    When confidence_floor is set, autopilot still requires human review if
+    the result's confidence is below the threshold.
+    """
     session["stage_approvals"][stage]["proposed"] = result
     session["stage_approvals"][stage]["edited"] = None
     session["stage_approvals"][stage]["status"] = "proposed"
     if session.get("mode", "copilot") == "autopilot":
+        if confidence_floor is not None and (result.get("confidence") or 0.0) < confidence_floor:
+            return False
         session["stage_approvals"][stage]["status"] = "approved"
         return True
     return False
@@ -672,7 +678,7 @@ async def check_coverage(session_id: str):
 
     session["coverage_result"] = result
     session["status"] = "action"
-    auto_approved = _store_proposed(session, "coverage", result)
+    auto_approved = _store_proposed(session, "coverage", result, confidence_floor=CONFIDENCE_FLOOR)
     return {**result, "auto_approved": auto_approved}
 
 

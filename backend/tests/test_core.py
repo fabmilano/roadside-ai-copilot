@@ -250,9 +250,9 @@ class TestCoverageDecisionLLM:
 
     LLM_COVERED = {
         "covered": True,
-        "event_type": "Roadside breakdown",
+        "event_type": "Breakdown",
         "applicable_section": "Mechanical or electrical failure at the roadside",
-        "services_entitled": ["Roadside repair attempt (up to 60 minutes)", "National recovery"],
+        "services_entitled": ["Roadside Attempt", "National Recovery"],
         "exclusions_flagged": [],
         "reasoning": "Alternator failure is a covered mechanical fault under Gold.",
         "citations": [{"section": "Mechanical or electrical failure at the roadside", "snippet": "..."}],
@@ -281,12 +281,12 @@ class TestCoverageDecisionLLM:
         r = self._run(fields, {"tier": "gold", "notes": ""})
         assert r["covered"] is True
         assert r["confidence"] == 0.92
-        assert "National recovery" in r["services_entitled"]
+        assert "National Recovery" in r["services_entitled"]
 
     def test_llm_denied_decision_propagates(self):
         llm_resp = {
             "covered": False,
-            "event_type": "Commercial use exclusion",
+            "event_type": "Commercial Use Exclusion",
             "applicable_section": "Commercial use and hire-or-reward",
             "services_entitled": [],
             "exclusions_flagged": ["Commercial use - vehicle used for Uber"],
@@ -684,9 +684,121 @@ class TestSchemaDefinitions:
         assert "$defs" not in schema
         assert "$ref" not in str(schema)
 
+    def test_services_entitled_has_enum_constraint(self):
+        from schemas import CoverageResult
+        schema = CoverageResult.model_json_schema()
+        items = schema["properties"]["services_entitled"]["items"]
+        assert "enum" in items
+        enum_vals = set(items["enum"])
+        assert "Hire Car" in enum_vals
+        assert "Hotel Accommodation" in enum_vals
+        assert "Rail Travel" in enum_vals
+        assert "Roadside Attempt" in enum_vals
+
+    def test_event_type_has_enum_constraint(self):
+        from schemas import CoverageResult
+        schema = CoverageResult.model_json_schema()
+        et = schema["properties"]["event_type"]
+        assert "enum" in et
+        enum_vals = set(et["enum"])
+        assert "Breakdown" in enum_vals
+        assert "Commercial Use Exclusion" in enum_vals
+        assert "Accident" in enum_vals
+
+    def test_confidence_has_range_constraint(self):
+        from schemas import CoverageResult
+        schema = CoverageResult.model_json_schema()
+        conf = schema["properties"]["confidence"]
+        assert conf.get("minimum") == 0.0
+        assert conf.get("maximum") == 1.0
+
+    def test_pydantic_rejects_invalid_service_name(self):
+        from schemas import CoverageResult
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            CoverageResult(
+                covered=True, event_type="Breakdown", applicable_section="test",
+                services_entitled=["Bogus Free Text Service"],
+                exclusions_flagged=[], reasoning="test", citations=[], confidence=0.9,
+            )
+
+    def test_pydantic_rejects_invalid_event_type(self):
+        from schemas import CoverageResult
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            CoverageResult(
+                covered=True, event_type="Roadside breakdown", applicable_section="test",
+                services_entitled=["Hire Car"],
+                exclusions_flagged=[], reasoning="test", citations=[], confidence=0.9,
+            )
+
+    def test_pydantic_rejects_confidence_out_of_range(self):
+        from schemas import CoverageResult
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            CoverageResult(
+                covered=True, event_type="Breakdown", applicable_section="test",
+                services_entitled=[],
+                exclusions_flagged=[], reasoning="test", citations=[], confidence=1.5,
+            )
+
+    def test_pydantic_accepts_valid_canonical_values(self):
+        from schemas import CoverageResult
+        r = CoverageResult(
+            covered=True, event_type="Flat Battery", applicable_section="test",
+            services_entitled=["Roadside Attempt", "Hire Car", "Rail Travel"],
+            exclusions_flagged=[], reasoning="test", citations=[], confidence=0.85,
+        )
+        assert r.event_type == "Flat Battery"
+        assert len(r.services_entitled) == 3
+
 
 # ---------------------------------------------------------------------------
-# 15. SMS assembly
+# 15. Canonical enum values work with action dispatch
+# ---------------------------------------------------------------------------
+
+class TestCanonicalEnumDispatch:
+    """Verify canonical service names from constrained decoding flow through to correct dispatch."""
+
+    def _sorted(self):
+        from action import find_nearby_garages
+        return find_nearby_garages(51.5074, -0.1278)
+
+    def test_canonical_hire_car(self):
+        from action import select_action
+        services = ["Roadside Attempt", "National Recovery", "Hire Car"]
+        r = select_action(self._sorted(), "breakdown", False, services, "gold")
+        assert r["onward_travel"] == "hire_car"
+
+    def test_canonical_rail_travel(self):
+        from action import select_action
+        services = ["Roadside Attempt", "Rail Travel"]
+        r = select_action(self._sorted(), "breakdown", False, services, "gold")
+        assert r["onward_travel"] == "rail"
+
+    def test_canonical_hotel_accommodation(self):
+        from action import select_action
+        services = ["Roadside Attempt", "Hotel Accommodation"]
+        r = select_action(self._sorted(), "breakdown", False, services, "gold")
+        assert r["onward_travel"] == "hotel"
+
+    def test_canonical_priority_order(self):
+        from action import select_action
+        services = ["Hotel Accommodation", "Rail Travel", "Hire Car"]
+        r = select_action(self._sorted(), "breakdown", False, services, "gold")
+        assert r["onward_travel"] == "hire_car"
+        assert r["onward_travel_options"] == ["hire_car", "rail", "hotel"]
+
+    def test_canonical_no_onward_when_empty(self):
+        from action import select_action
+        services = ["Roadside Attempt", "Local Recovery"]
+        r = select_action(self._sorted(), "breakdown", False, services, "bronze")
+        assert r["onward_travel"] == "none"
+        assert r["onward_travel_options"] == []
+
+
+# ---------------------------------------------------------------------------
+# 16. SMS assembly
 # ---------------------------------------------------------------------------
 
 from main import _assemble_sms
@@ -734,6 +846,116 @@ class TestSmsAssembly:
 # 16. Action dispatch short-circuits on undecided coverage
 # ---------------------------------------------------------------------------
 
+class TestAutopilotConfidenceGate:
+    """Autopilot auto-approves coverage only when confidence >= 0.50."""
+
+    def _make_session(self, sid, mode, confidence):
+        sessions.pop(sid, None)
+        create_session(sid)
+        s = sessions[sid]
+        s["mode"] = mode
+        s["status"] = "action"
+        s["extracted_fields"] = {
+            "policy_number": "ALC-10042", "incident_type": "breakdown",
+            "incident_description": "engine died", "vehicle_drivable": False,
+            "location_description": "London", "vehicle_reg": "AB21CDE",
+            "customer_name": "Sarah Mitchell", "is_safe": True, "passengers": 0,
+        }
+        s["customer_record"] = {"tier": "gold", "notes": "", "vehicle": {"make": "Ford", "model": "Focus", "year": 2021, "reg": "AB21 CDE"}}
+        cov = {
+            "covered": True, "event_type": "Breakdown", "applicable_section": "test",
+            "services_entitled": ["Roadside Attempt", "Hire Car"],
+            "exclusions_flagged": [], "reasoning": "test", "citations": [],
+            "confidence": confidence,
+        }
+        s["coverage_result"] = cov
+        return s, cov
+
+    def test_autopilot_high_confidence_auto_approves(self):
+        from main import _store_proposed
+        from embeddings import CONFIDENCE_FLOOR
+        sid = "test-autopilot-high"
+        s, cov = self._make_session(sid, "autopilot", 0.85)
+        result = _store_proposed(s, "coverage", cov, confidence_floor=CONFIDENCE_FLOOR)
+        assert result is True
+        assert s["stage_approvals"]["coverage"]["status"] == "approved"
+        sessions.pop(sid, None)
+
+    def test_autopilot_low_confidence_requires_review(self):
+        from main import _store_proposed
+        from embeddings import CONFIDENCE_FLOOR
+        sid = "test-autopilot-low"
+        s, cov = self._make_session(sid, "autopilot", 0.35)
+        result = _store_proposed(s, "coverage", cov, confidence_floor=CONFIDENCE_FLOOR)
+        assert result is False
+        assert s["stage_approvals"]["coverage"]["status"] == "proposed"
+        sessions.pop(sid, None)
+
+    def test_autopilot_exactly_at_floor_auto_approves(self):
+        from main import _store_proposed
+        from embeddings import CONFIDENCE_FLOOR
+        sid = "test-autopilot-exact"
+        s, cov = self._make_session(sid, "autopilot", 0.50)
+        result = _store_proposed(s, "coverage", cov, confidence_floor=CONFIDENCE_FLOOR)
+        assert result is True
+        assert s["stage_approvals"]["coverage"]["status"] == "approved"
+        sessions.pop(sid, None)
+
+    def test_copilot_always_requires_review(self):
+        from main import _store_proposed
+        from embeddings import CONFIDENCE_FLOOR
+        sid = "test-copilot-high"
+        s, cov = self._make_session(sid, "copilot", 0.95)
+        result = _store_proposed(s, "coverage", cov, confidence_floor=CONFIDENCE_FLOOR)
+        assert result is False
+        assert s["stage_approvals"]["coverage"]["status"] == "proposed"
+        sessions.pop(sid, None)
+
+    def test_autopilot_no_floor_always_approves(self):
+        """Stages without confidence_floor (action, notify) still auto-approve in autopilot."""
+        from main import _store_proposed
+        sid = "test-autopilot-nofloor"
+        s, cov = self._make_session(sid, "autopilot", 0.1)
+        result = _store_proposed(s, "action", cov)
+        assert result is True
+        assert s["stage_approvals"]["action"]["status"] == "approved"
+        sessions.pop(sid, None)
+
+
+class TestHireCarEndToEnd:
+    """Coverage with canonical enum services flows through to hire_car dispatch."""
+
+    def test_canonical_services_produce_hire_car_dispatch(self):
+        sid = "test-hire-e2e"
+        sessions.pop(sid, None)
+        create_session(sid)
+        s = sessions[sid]
+        s["status"] = "action"
+        s["coverage_result"] = {
+            "covered": True, "event_type": "Breakdown",
+            "applicable_section": "Roadside Assistance",
+            "services_entitled": ["Roadside Attempt", "National Recovery", "Hire Car", "Rail Travel"],
+            "exclusions_flagged": [], "reasoning": "Gold tier covered",
+            "citations": [], "confidence": 0.92,
+        }
+        s["customer_record"] = {"tier": "gold", "notes": ""}
+        s["extracted_fields"] = {
+            "incident_type": "breakdown", "vehicle_drivable": False,
+            "location_description": "Near junction 15 on the M6",
+        }
+
+        from starlette.testclient import TestClient
+        from main import app
+        client = TestClient(app)
+        resp = client.post(f"/api/next-action/{sid}")
+        data = resp.json()
+        assert data["recovery_action"] == "tow"
+        assert data["onward_travel"] == "hire_car"
+        assert "hire_car" in data["onward_travel_options"]
+        assert "rail" in data["onward_travel_options"]
+        sessions.pop(sid, None)
+
+
 class TestActionCoverageShortCircuit:
     def test_covered_none_returns_no_dispatch(self):
         sid = "test-action-none-001"
@@ -768,7 +990,7 @@ class TestActionCoverageShortCircuit:
         s["status"] = "action"
         s["coverage_result"] = {
             "covered": False,
-            "event_type": "Commercial use exclusion",
+            "event_type": "Commercial Use Exclusion",
             "services_entitled": [],
             "reasoning": "Denied",
         }

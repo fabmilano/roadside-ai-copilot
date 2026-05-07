@@ -66,15 +66,17 @@ Rules:
 - If an excerpt under "What is not covered" clearly applies to this claim, set covered to false and cite that section.
 - Customer notes on file (e.g. commercial use flags) are authoritative - if the notes indicate use that is excluded by the policy, apply the exclusion.
 - If the claim is covered, list only the specific services mentioned in the relevant excerpt. Do not add services from excerpts that don't match the incident.
+- event_type MUST be one of: "Breakdown", "Flat Battery", "Flat Tyre", "Fuel", "Accident", "Key Issue", "Commercial Use Exclusion", "Other".
+- services_entitled values MUST be from this list only: "Roadside Attempt", "Local Recovery", "National Recovery", "Home Start", "Labour", "Hire Car", "Hotel Accommodation", "Rail Travel".
 - If the incident is not drivable and the relevant excerpt mentions onward travel options, include those services.
 - Set confidence to a value between 0.0 and 1.0. Use a value below 0.5 only when the excerpts genuinely do not address the situation and you cannot decide.
 
 Return ONLY this JSON object, no other text:
 {
   "covered": true or false or null,
-  "event_type": "short label for the event type (e.g. Roadside breakdown, Flat battery, Commercial use exclusion)",
+  "event_type": "Breakdown",
   "applicable_section": "the exact title of the primary policy section that drives this decision",
-  "services_entitled": ["service 1", "service 2"],
+  "services_entitled": ["Roadside Attempt", "Hire Car"],
   "exclusions_flagged": ["exclusion description if denied, empty list if covered"],
   "reasoning": "one or two sentences explaining the decision, citing the policy language",
   "citations": [{"section": "section title", "snippet": "verbatim quote of the key sentence from the policy"}],
