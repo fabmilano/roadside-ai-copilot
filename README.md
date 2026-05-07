@@ -14,7 +14,7 @@ The distinction matters: observation alone isn't leverage. This prototype goes f
 - SMS wording can be legally sensitive. The agent should own what gets sent.
 - An agent who notices an error mid-flow should be able to fix it, not just flag it.
 
-**Co-pilot is the default.** New sessions start with operator approval required at every stage. **Autopilot mode** runs the same pipeline end-to-end with all stages auto-approved - it's available via a toggle for low-risk cases or demos, and switching mid-session auto-approves any pending stage.
+**Co-pilot is the default.** New sessions start with operator approval required at every stage. **Autopilot mode** auto-approves most stages, but coverage decisions with confidence below 0.50 still require operator review. Available via a toggle for low-risk cases or demos; switching mid-session auto-approves any pending stage.
 
 ---
 
@@ -96,7 +96,7 @@ Sending the whole policy to an LLM on every claim is expensive, and a general-pu
 
 The policy documents (`backend/data/policy_*.md`) are plain markdown - section headers and prose paragraphs, written the way a product team would write them. No machine-readable metadata, no trigger tables.
 
-**Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. When the vehicle is not drivable, a separate semantic pinning pass runs: a pre-embedded synthetic query about onward travel is compared against the tier's sections, and the best match is appended if it wasn't already in the top 4. This ensures onward-travel entitlements are surfaced even though incident-focused language ("engine seized") scores poorly against travel/accommodation prose.
+**Step 1 - Embedding retrieval**: on startup, each `### Section` and its prose is embedded with `gemini-embedding-001`. At claim time, the customer's incident description and customer notes are embedded as a query, and the top-4 most relevant sections from their tier's policy file are retrieved by cosine similarity. When the vehicle is not drivable, a synthetic anchor query pass runs: a pre-embedded query about onward travel is compared against the tier's sections, and the best match is appended if it wasn't already in the top 4. This ensures onward-travel entitlements are surfaced even though incident-focused language ("engine seized") scores poorly against travel/accommodation prose.
 
 **Step 2 - LLM decision**: the retrieved sections are passed to the LLM as verbatim policy prose, alongside the claim details. The LLM reads them and returns a structured JSON decision via constrained decoding (Pydantic schema compiled to a request-level constraint). Key fields are enum-constrained to canonical values that the downstream deterministic dispatch can match reliably:
 
@@ -114,7 +114,7 @@ Free-text fields (`reasoning`, `citations`, `exclusions_flagged`) remain unconst
 
 ---
 
-## O(1) intake prompt size
+## Bounded intake prompt size
 
 The intake LLM receives a state snapshot per turn, not the full conversation history:
 
@@ -208,7 +208,7 @@ The AI proposes both slots based on coverage entitlements. In co-pilot mode the 
 │   │   └── policy_gold.md
 │   └── tests/
 │       ├── conftest.py
-│       ├── test_core.py     # 94 unit tests (LLM and embedding calls mocked)
+│       ├── test_core.py     # 98 unit tests (LLM and embedding calls mocked)
 │       └── stress/          # End-to-end demo scripts (require live server + API key)
 │           ├── test_demo_cases_1.py  # Cases A-D (Carter, Barnes, Stone, Mitchell)
 │           ├── test_demo_cases_2.py  # Cases E-H (Wilson, Clark, Foster, Bradley)
@@ -284,7 +284,7 @@ Open `http://localhost:5173`. Backend must be running on port 8000.
 ```bash
 cd backend
 pytest
-# 94 tests - LLM and embedding calls are mocked throughout
+# 98 tests - LLM and embedding calls are mocked throughout
 ```
 
 **End-to-end stress tests** (require live server and API key)
